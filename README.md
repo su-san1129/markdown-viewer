@@ -19,6 +19,10 @@ multiple file types from a folder tree with fast preview, search, and format-spe
 - JSON: `.json` (tree view)
 - CSV/TSV: `.csv`, `.tsv` (table view, auto delimiter detection: comma/tab/semicolon)
 - DXF: `.dxf` (2D canvas preview for common entities: line/polyline/circle/arc)
+- Text: `.txt`, `.text`, `.log`, `.ini`, `.cfg`, `.conf`, `.yaml`, `.yml`, `.toml`, `.xml`, `.sql`,
+  `.sh`, `.bash`, `.zsh`, `.fish`, `.ps1`, `.bat`, `.cmd`, `.c`, `.h`, `.cpp`, `.hpp`, `.py`, `.rb`,
+  `.go`, `.rs`, `.java`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.css`, `.scss`, `.less`
+  (line numbers + wrap toggle)
 - Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`
 - PDF: `.pdf` (embedded `pdf.js` viewer with page navigation and zoom)
 

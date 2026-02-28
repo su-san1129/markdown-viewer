@@ -5,6 +5,7 @@ import { dxfViewerPlugin } from "./plugins/dxf";
 import { jsonViewerPlugin } from "./plugins/json";
 import { markdownViewerPlugin } from "./plugins/markdown";
 import { pdfViewerPlugin } from "./plugins/pdf";
+import { textViewerPlugin } from "./plugins/text";
 import { getFileExtension } from "./fileTypes";
 import type { ViewerPlugin } from "./types";
 
@@ -22,6 +23,7 @@ registerViewer(htmlViewerPlugin);
 registerViewer(jsonViewerPlugin);
 registerViewer(csvViewerPlugin);
 registerViewer(dxfViewerPlugin);
+registerViewer(textViewerPlugin);
 registerViewer(imageViewerPlugin);
 registerViewer(pdfViewerPlugin);
 

@@ -20,6 +20,47 @@ pub struct SupportedFileType {
     pub searchable: bool,
 }
 
+fn text_extensions() -> Vec<String> {
+    vec![
+        "txt".to_string(),
+        "text".to_string(),
+        "log".to_string(),
+        "ini".to_string(),
+        "cfg".to_string(),
+        "conf".to_string(),
+        "yaml".to_string(),
+        "yml".to_string(),
+        "toml".to_string(),
+        "xml".to_string(),
+        "sql".to_string(),
+        "sh".to_string(),
+        "bash".to_string(),
+        "zsh".to_string(),
+        "fish".to_string(),
+        "ps1".to_string(),
+        "bat".to_string(),
+        "cmd".to_string(),
+        "c".to_string(),
+        "h".to_string(),
+        "cpp".to_string(),
+        "hpp".to_string(),
+        "py".to_string(),
+        "rb".to_string(),
+        "go".to_string(),
+        "rs".to_string(),
+        "java".to_string(),
+        "js".to_string(),
+        "jsx".to_string(),
+        "mjs".to_string(),
+        "cjs".to_string(),
+        "ts".to_string(),
+        "tsx".to_string(),
+        "css".to_string(),
+        "scss".to_string(),
+        "less".to_string(),
+    ]
+}
+
 fn supported_file_types() -> Vec<SupportedFileType> {
     vec![
         SupportedFileType {
@@ -50,6 +91,12 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             id: "dxf".to_string(),
             label: "DXF".to_string(),
             extensions: vec!["dxf".to_string()],
+            searchable: true,
+        },
+        SupportedFileType {
+            id: "text".to_string(),
+            label: "Text".to_string(),
+            extensions: text_extensions(),
             searchable: true,
         },
         SupportedFileType {
@@ -294,4 +341,38 @@ pub async fn search_files(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contains_extension(extensions: &[String], expected: &str) -> bool {
+        extensions.iter().any(|ext| ext == expected)
+    }
+
+    #[test]
+    fn text_filter_returns_text_extensions() {
+        let extensions = extensions_from_filter("text");
+        assert!(contains_extension(&extensions, "txt"));
+        assert!(contains_extension(&extensions, "log"));
+        assert!(contains_extension(&extensions, "yaml"));
+        assert!(contains_extension(&extensions, "ts"));
+    }
+
+    #[test]
+    fn all_filter_includes_text_extensions() {
+        let extensions = extensions_from_filter("all");
+        assert!(contains_extension(&extensions, "md"));
+        assert!(contains_extension(&extensions, "txt"));
+        assert!(contains_extension(&extensions, "dxf"));
+        assert!(!contains_extension(&extensions, "png"));
+    }
+
+    #[test]
+    fn extension_check_is_case_insensitive() {
+        let path = Path::new("/tmp/sample.TXT");
+        let extensions = vec!["txt".to_string()];
+        assert!(is_extension_in(path, &extensions));
+    }
 }
