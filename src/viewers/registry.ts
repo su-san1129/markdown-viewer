@@ -1,6 +1,9 @@
 import { htmlViewerPlugin } from "./plugins/html";
+import { imageViewerPlugin } from "./plugins/image";
 import { jsonViewerPlugin } from "./plugins/json";
 import { markdownViewerPlugin } from "./plugins/markdown";
+import { pdfViewerPlugin } from "./plugins/pdf";
+import { getFileExtension } from "./fileTypes";
 import type { ViewerPlugin } from "./types";
 
 const viewerPlugins: ViewerPlugin[] = [];
@@ -15,16 +18,11 @@ export function registerViewer(plugin: ViewerPlugin) {
 registerViewer(markdownViewerPlugin);
 registerViewer(htmlViewerPlugin);
 registerViewer(jsonViewerPlugin);
-
-function getExtension(filePath: string): string {
-  const fileName = filePath.split("/").pop() ?? "";
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex < 0) return "";
-  return fileName.slice(dotIndex + 1).toLowerCase();
-}
+registerViewer(imageViewerPlugin);
+registerViewer(pdfViewerPlugin);
 
 export function resolveViewer(filePath: string): ViewerPlugin | null {
-  const extension = getExtension(filePath);
+  const extension = getFileExtension(filePath);
   if (!extension) return null;
 
   return viewerPlugins.find((plugin) =>

@@ -45,9 +45,11 @@ const initialState: AppState = {
   caseSensitive: false,
   searchFileType: "all",
   supportedFileTypes: [
-    { id: "md", label: "Markdown", extensions: ["md", "markdown"] },
-    { id: "html", label: "HTML", extensions: ["html", "htm"] },
-    { id: "json", label: "JSON", extensions: ["json"] },
+    { id: "md", label: "Markdown", extensions: ["md", "markdown"], searchable: true },
+    { id: "html", label: "HTML", extensions: ["html", "htm"], searchable: true },
+    { id: "json", label: "JSON", extensions: ["json"], searchable: true },
+    { id: "image", label: "Image", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"], searchable: false },
+    { id: "pdf", label: "PDF", extensions: ["pdf"], searchable: false },
   ],
 };
 

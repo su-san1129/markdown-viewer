@@ -44,7 +44,7 @@ export function SearchBar() {
           title="検索対象ファイル"
         >
           <option value="all">All</option>
-          {supportedFileTypes.map((type) => (
+          {supportedFileTypes.filter((type) => type.searchable).map((type) => (
             <option key={type.id} value={type.id}>
               {type.label}
             </option>

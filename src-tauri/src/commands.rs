@@ -17,6 +17,7 @@ pub struct SupportedFileType {
     pub id: String,
     pub label: String,
     pub extensions: Vec<String>,
+    pub searchable: bool,
 }
 
 fn supported_file_types() -> Vec<SupportedFileType> {
@@ -25,16 +26,41 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             id: "md".to_string(),
             label: "Markdown".to_string(),
             extensions: vec!["md".to_string(), "markdown".to_string()],
+            searchable: true,
         },
         SupportedFileType {
             id: "html".to_string(),
             label: "HTML".to_string(),
             extensions: vec!["html".to_string(), "htm".to_string()],
+            searchable: true,
         },
         SupportedFileType {
             id: "json".to_string(),
             label: "JSON".to_string(),
             extensions: vec!["json".to_string()],
+            searchable: true,
+        },
+        SupportedFileType {
+            id: "image".to_string(),
+            label: "Image".to_string(),
+            extensions: vec![
+                "png".to_string(),
+                "jpg".to_string(),
+                "jpeg".to_string(),
+                "gif".to_string(),
+                "webp".to_string(),
+                "svg".to_string(),
+                "bmp".to_string(),
+                "ico".to_string(),
+                "avif".to_string(),
+            ],
+            searchable: false,
+        },
+        SupportedFileType {
+            id: "pdf".to_string(),
+            label: "PDF".to_string(),
+            extensions: vec!["pdf".to_string()],
+            searchable: false,
         },
     ]
 }
@@ -56,13 +82,14 @@ fn extensions_from_filter(file_type_filter: &str) -> Vec<String> {
     if file_type_filter == "all" {
         return supported_file_types()
             .into_iter()
+            .filter(|kind| kind.searchable)
             .flat_map(|kind| kind.extensions)
             .collect();
     }
 
     supported_file_types()
         .into_iter()
-        .find(|kind| kind.id == file_type_filter)
+        .find(|kind| kind.id == file_type_filter && kind.searchable)
         .map(|kind| kind.extensions)
         .unwrap_or_default()
 }

@@ -20,4 +20,5 @@ export interface SupportedFileType {
   id: string;
   label: string;
   extensions: string[];
+  searchable: boolean;
 }

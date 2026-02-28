@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, FileText } from "lucide-react";
 import type { SearchFileResult } from "../types";
 import { useAppState, useAppDispatch } from "../context/AppContext";
 import { readFileContent } from "../lib/tauri";
+import { isTextPreviewPath } from "../viewers/fileTypes";
 
 function highlightMatch(text: string, query: string, caseSensitive: boolean): ReactNode {
   if (!query) return text;
@@ -41,7 +42,9 @@ function SearchFileGroup({ result }: { result: SearchFileResult }) {
   const handleMatchClick = async (filePath: string) => {
     dispatch({ type: "SET_SELECTED_FILE", payload: filePath });
     try {
-      const content = await readFileContent(filePath);
+      const content = isTextPreviewPath(filePath)
+        ? await readFileContent(filePath)
+        : "";
       dispatch({ type: "SET_FILE_CONTENT", payload: content });
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: String(err) });

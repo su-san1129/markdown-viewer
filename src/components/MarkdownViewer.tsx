@@ -5,6 +5,7 @@ import { useAppState, useAppDispatch } from "../context/AppContext";
 import { readFileContent } from "../lib/tauri";
 import { EmptyState } from "./EmptyState";
 import { FindBar } from "./FindBar";
+import { isTextPreviewPath } from "../viewers/fileTypes";
 import { resolveViewer } from "../viewers/registry";
 
 export function MarkdownViewer() {
@@ -35,7 +36,9 @@ export function MarkdownViewer() {
           const kind = event.type;
           if (typeof kind === "object" && "modify" in kind) {
             try {
-              const content = await readFileContent(selectedFilePath);
+              const content = isTextPreviewPath(selectedFilePath)
+                ? await readFileContent(selectedFilePath)
+                : "";
               dispatch({ type: "SET_FILE_CONTENT", payload: content });
             } catch {
               // File may have been deleted
@@ -159,7 +162,7 @@ export function MarkdownViewer() {
         {fileName}
       </div>
       {findVisible && supportsFind && <FindBar contentRef={contentRef} onClose={closeFindBar} />}
-      <div style={{ flex: 1, overflowY: viewer?.id === "html" ? "hidden" : "auto", padding: viewer?.id === "html" ? 0 : "var(--sp-6) var(--sp-10)" }}>
+      <div style={{ flex: 1, overflowY: viewer?.id === "html" || viewer?.id === "pdf" ? "hidden" : "auto", padding: viewer?.id === "html" || viewer?.id === "pdf" ? 0 : "var(--sp-6) var(--sp-10)" }}>
         {viewer ? (
           viewer.render({
             filePath: selectedFilePath,

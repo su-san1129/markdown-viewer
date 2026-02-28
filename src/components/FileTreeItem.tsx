@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, Folder, FileText } from "lucide-react";
 import type { FileEntry } from "../types";
 import { useAppState, useAppDispatch } from "../context/AppContext";
 import { readFileContent } from "../lib/tauri";
+import { isTextPreviewPath } from "../viewers/fileTypes";
 import { FileTree } from "./FileTree";
 
 interface FileTreeItemProps {
@@ -25,7 +26,9 @@ export function FileTreeItem({ entry, depth }: FileTreeItemProps) {
     } else {
       dispatch({ type: "SET_SELECTED_FILE", payload: entry.path });
       try {
-        const content = await readFileContent(entry.path);
+        const content = isTextPreviewPath(entry.path)
+          ? await readFileContent(entry.path)
+          : "";
         dispatch({ type: "SET_FILE_CONTENT", payload: content });
       } catch (err) {
         dispatch({ type: "SET_ERROR", payload: String(err) });
