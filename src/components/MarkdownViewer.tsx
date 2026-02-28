@@ -1,25 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import type { Components } from "react-markdown";
 import { watchImmediate } from "@tauri-apps/plugin-fs";
 import { FileText } from "lucide-react";
 import { useAppState, useAppDispatch } from "../context/AppContext";
 import { readFileContent } from "../lib/tauri";
 import { EmptyState } from "./EmptyState";
 import { FindBar } from "./FindBar";
-import { MermaidBlock } from "./MermaidBlock";
-
-const markdownComponents: Components = {
-  code({ className, children, ...props }) {
-    const match = /language-mermaid/.exec(className || "");
-    if (match) {
-      return <MermaidBlock>{String(children).replace(/\n$/, "")}</MermaidBlock>;
-    }
-    return <code className={className} {...props}>{children}</code>;
-  },
-};
+import { resolveViewer } from "../viewers/registry";
 
 export function MarkdownViewer() {
   const { rootPath, selectedFilePath, fileContent, loading, error } = useAppState();
@@ -29,6 +15,8 @@ export function MarkdownViewer() {
   const [findVisible, setFindVisible] = useState(false);
 
   const closeFindBar = useCallback(() => setFindVisible(false), []);
+  const viewer = selectedFilePath ? resolveViewer(selectedFilePath) : null;
+  const supportsFind = viewer?.supportsFind ?? true;
 
   useEffect(() => {
     if (!selectedFilePath) return;
@@ -71,29 +59,28 @@ export function MarkdownViewer() {
     };
   }, [selectedFilePath, dispatch]);
 
-  // Cmd+F → open find bar
+  // Cmd+F -> open find bar when viewer supports in-file find
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        if (!supportsFind) return;
         e.preventDefault();
         setFindVisible(true);
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [supportsFind]);
 
-  // Close find bar on file switch
+  // Close find bar on file switch or when viewer does not support it
   useEffect(() => {
     setFindVisible(false);
-  }, [selectedFilePath]);
+  }, [selectedFilePath, supportsFind]);
 
-  // No folder open → welcome screen
   if (!selectedFilePath && !rootPath) {
     return <EmptyState />;
   }
 
-  // Folder open, no file selected
   if (!selectedFilePath) {
     return (
       <div
@@ -110,7 +97,7 @@ export function MarkdownViewer() {
         }}
       >
         <FileText size={40} strokeWidth={1} />
-        <p style={{ fontSize: "var(--font-ui)" }}>Markdownファイルを選択してプレビュー</p>
+        <p style={{ fontSize: "var(--font-ui)" }}>対応ファイルを選択してプレビュー</p>
       </div>
     );
   }
@@ -152,10 +139,10 @@ export function MarkdownViewer() {
   }
 
   const fileName = selectedFilePath.split("/").pop() ?? "";
+  const content = fileContent ?? "";
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", backgroundColor: "var(--bg-main)" }}>
-      {/* File tab */}
       <div
         style={{
           display: "flex",
@@ -171,18 +158,22 @@ export function MarkdownViewer() {
       >
         {fileName}
       </div>
-      {findVisible && <FindBar contentRef={contentRef} onClose={closeFindBar} />}
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "var(--sp-6) var(--sp-10)" }}>
-        <div ref={contentRef} className="markdown-body" style={{ maxWidth: 900, margin: "0 auto" }}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {fileContent ?? ""}
-          </ReactMarkdown>
-        </div>
+      {findVisible && supportsFind && <FindBar contentRef={contentRef} onClose={closeFindBar} />}
+      <div style={{ flex: 1, overflowY: viewer?.id === "html" ? "hidden" : "auto", padding: viewer?.id === "html" ? 0 : "var(--sp-6) var(--sp-10)" }}>
+        {viewer ? (
+          viewer.render({
+            filePath: selectedFilePath,
+            content,
+            contentRef,
+          })
+        ) : (
+          <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <p style={{ marginBottom: "var(--sp-3)", color: "var(--text-secondary)" }}>
+              この拡張子は未対応です。生テキストを表示します。
+            </p>
+            <pre className="plain-text-view">{content}</pre>
+          </div>
+        )}
       </div>
     </div>
   );

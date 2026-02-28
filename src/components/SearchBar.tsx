@@ -3,7 +3,7 @@ import { Search, X } from "lucide-react";
 import { useAppState, useAppDispatch } from "../context/AppContext";
 
 export function SearchBar() {
-  const { searchQuery, caseSensitive } = useAppState();
+  const { searchQuery, caseSensitive, searchFileType, supportedFileTypes } = useAppState();
   const dispatch = useAppDispatch();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -24,7 +24,32 @@ export function SearchBar() {
           padding: "0 var(--sp-1)",
           gap: "var(--sp-1)",
         }}
-      >
+        >
+        <select
+          value={searchFileType}
+          onChange={(e) =>
+            dispatch({ type: "SET_SEARCH_FILE_TYPE", payload: e.target.value })
+          }
+          style={{
+            height: 22,
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            fontSize: "var(--font-label)",
+            fontFamily: "inherit",
+            cursor: "pointer",
+            minWidth: 70,
+          }}
+          title="検索対象ファイル"
+        >
+          <option value="all">All</option>
+          {supportedFileTypes.map((type) => (
+            <option key={type.id} value={type.id}>
+              {type.label}
+            </option>
+          ))}
+        </select>
         <Search
           size={14}
           style={{ flexShrink: 0, color: "var(--text-secondary)" }}

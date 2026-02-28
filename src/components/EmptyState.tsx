@@ -26,10 +26,10 @@ export function EmptyState() {
       <div style={{ maxWidth: 420, width: "100%" }}>
         {/* Title */}
         <h1 style={{ fontSize: "var(--font-welcome)", fontWeight: 300, color: "var(--welcome-title)", marginBottom: 4 }}>
-          Markdown Viewer
+          Document Viewer
         </h1>
         <p style={{ fontSize: "var(--font-ui)", color: "var(--text-secondary)", marginBottom: "var(--sp-8)" }}>
-          ローカルフォルダのMarkdownを快適に閲覧
+          ローカルフォルダの対応ファイルを快適に閲覧
         </p>
 
         {/* Start */}

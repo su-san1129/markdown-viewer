@@ -3,7 +3,7 @@ import { useAppState, useAppDispatch } from "../context/AppContext";
 import { searchFiles } from "./tauri";
 
 export function useSearch() {
-  const { rootPath, searchQuery, caseSensitive } = useAppState();
+  const { rootPath, searchQuery, caseSensitive, searchFileType } = useAppState();
   const dispatch = useAppDispatch();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -21,7 +21,7 @@ export function useSearch() {
 
     timerRef.current = setTimeout(async () => {
       try {
-        const results = await searchFiles(rootPath, searchQuery, caseSensitive);
+        const results = await searchFiles(rootPath, searchQuery, caseSensitive, searchFileType);
         dispatch({ type: "SET_SEARCH_RESULTS", payload: results });
       } catch {
         dispatch({ type: "SET_SEARCH_RESULTS", payload: [] });
@@ -33,5 +33,5 @@ export function useSearch() {
         clearTimeout(timerRef.current);
       }
     };
-  }, [rootPath, searchQuery, caseSensitive, dispatch]);
+  }, [rootPath, searchQuery, caseSensitive, searchFileType, dispatch]);
 }

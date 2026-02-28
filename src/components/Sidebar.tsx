@@ -54,7 +54,7 @@ export function Sidebar() {
                   color: "var(--text-secondary)",
                 }}
               >
-                Markdownファイルが見つかりません
+                対応ファイルが見つかりません
               </div>
             ) : (
               <div
@@ -65,7 +65,7 @@ export function Sidebar() {
                   textAlign: "center",
                 }}
               >
-                フォルダを開いてMarkdownファイルを閲覧
+                フォルダを開いて対応ファイルを閲覧
               </div>
             )}
           </>

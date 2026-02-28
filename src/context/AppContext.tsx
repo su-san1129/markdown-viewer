@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, type ReactNode, type Dispatch } from "react";
-import type { FileEntry, SearchFileResult } from "../types";
+import type { FileEntry, SearchFileResult, SupportedFileType } from "../types";
 
 interface AppState {
   rootPath: string | null;
@@ -12,6 +12,8 @@ interface AppState {
   searchResults: SearchFileResult[];
   searchLoading: boolean;
   caseSensitive: boolean;
+  searchFileType: string;
+  supportedFileTypes: SupportedFileType[];
 }
 
 type AppAction =
@@ -26,6 +28,8 @@ type AppAction =
   | { type: "SET_SEARCH_RESULTS"; payload: SearchFileResult[] }
   | { type: "SET_SEARCH_LOADING"; payload: boolean }
   | { type: "TOGGLE_CASE_SENSITIVE" }
+  | { type: "SET_SEARCH_FILE_TYPE"; payload: string }
+  | { type: "SET_SUPPORTED_FILE_TYPES"; payload: SupportedFileType[] }
   | { type: "CLEAR_SEARCH" };
 
 const initialState: AppState = {
@@ -39,12 +43,18 @@ const initialState: AppState = {
   searchResults: [],
   searchLoading: false,
   caseSensitive: false,
+  searchFileType: "all",
+  supportedFileTypes: [
+    { id: "md", label: "Markdown", extensions: ["md", "markdown"] },
+    { id: "html", label: "HTML", extensions: ["html", "htm"] },
+    { id: "json", label: "JSON", extensions: ["json"] },
+  ],
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "SET_ROOT_PATH":
-      return { ...state, rootPath: action.payload, selectedFilePath: null, fileContent: null, error: null, searchQuery: "", searchResults: [], searchLoading: false };
+      return { ...state, rootPath: action.payload, selectedFilePath: null, fileContent: null, error: null, searchQuery: "", searchResults: [], searchLoading: false, searchFileType: "all" };
     case "SET_FILE_TREE":
       return { ...state, fileTree: action.payload, loading: false };
     case "SET_SELECTED_FILE":
@@ -65,6 +75,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, searchLoading: action.payload };
     case "TOGGLE_CASE_SENSITIVE":
       return { ...state, caseSensitive: !state.caseSensitive };
+    case "SET_SEARCH_FILE_TYPE":
+      return { ...state, searchFileType: action.payload };
+    case "SET_SUPPORTED_FILE_TYPES":
+      return { ...state, supportedFileTypes: action.payload };
     case "CLEAR_SEARCH":
       return { ...state, searchQuery: "", searchResults: [], searchLoading: false };
     default:

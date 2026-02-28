@@ -12,7 +12,62 @@ pub struct FileEntry {
     pub children: Option<Vec<FileEntry>>,
 }
 
-/// Recursively build a filtered directory tree containing only .md files
+#[derive(Debug, Clone, Serialize)]
+pub struct SupportedFileType {
+    pub id: String,
+    pub label: String,
+    pub extensions: Vec<String>,
+}
+
+fn supported_file_types() -> Vec<SupportedFileType> {
+    vec![
+        SupportedFileType {
+            id: "md".to_string(),
+            label: "Markdown".to_string(),
+            extensions: vec!["md".to_string(), "markdown".to_string()],
+        },
+        SupportedFileType {
+            id: "html".to_string(),
+            label: "HTML".to_string(),
+            extensions: vec!["html".to_string(), "htm".to_string()],
+        },
+        SupportedFileType {
+            id: "json".to_string(),
+            label: "JSON".to_string(),
+            extensions: vec!["json".to_string()],
+        },
+    ]
+}
+
+fn is_extension_in(path: &Path, extensions: &[String]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| extensions.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+        .unwrap_or(false)
+}
+
+fn is_supported_file(path: &Path) -> bool {
+    supported_file_types()
+        .iter()
+        .any(|kind| is_extension_in(path, &kind.extensions))
+}
+
+fn extensions_from_filter(file_type_filter: &str) -> Vec<String> {
+    if file_type_filter == "all" {
+        return supported_file_types()
+            .into_iter()
+            .flat_map(|kind| kind.extensions)
+            .collect();
+    }
+
+    supported_file_types()
+        .into_iter()
+        .find(|kind| kind.id == file_type_filter)
+        .map(|kind| kind.extensions)
+        .unwrap_or_default()
+}
+
+/// Recursively build a filtered directory tree containing only supported files
 /// and the directories that contain them. Hidden files/dirs are excluded.
 fn build_tree(dir: &Path) -> Vec<FileEntry> {
     let mut entries: Vec<FileEntry> = Vec::new();
@@ -46,19 +101,13 @@ fn build_tree(dir: &Path) -> Vec<FileEntry> {
         let is_dir = path.is_dir();
 
         if is_dir {
-            // Check if directory contains any .md files (recursively)
-            let has_md = WalkDir::new(&path)
+            // Check if directory contains any supported files (recursively)
+            let has_supported = WalkDir::new(&path)
                 .into_iter()
                 .filter_map(|e| e.ok())
-                .any(|e| {
-                    e.file_type().is_file()
-                        && e.path()
-                            .extension()
-                            .map(|ext| ext.eq_ignore_ascii_case("md"))
-                            .unwrap_or(false)
-                });
+                .any(|e| e.file_type().is_file() && is_supported_file(e.path()));
 
-            if has_md {
+            if has_supported {
                 let children = build_tree(&path);
                 entries.push(FileEntry {
                     name,
@@ -67,11 +116,7 @@ fn build_tree(dir: &Path) -> Vec<FileEntry> {
                     children: Some(children),
                 });
             }
-        } else if path
-            .extension()
-            .map(|ext| ext.eq_ignore_ascii_case("md"))
-            .unwrap_or(false)
-        {
+        } else if is_supported_file(&path) {
             entries.push(FileEntry {
                 name,
                 path: path.to_string_lossy().to_string(),
@@ -94,6 +139,11 @@ pub async fn read_directory_tree(path: String) -> Result<Vec<FileEntry>, String>
         return Err(format!("Not a directory: {}", path));
     }
     Ok(build_tree(dir))
+}
+
+#[tauri::command]
+pub async fn get_supported_file_types() -> Result<Vec<SupportedFileType>, String> {
+    Ok(supported_file_types())
 }
 
 #[tauri::command]
@@ -126,6 +176,7 @@ pub async fn search_files(
     root_path: String,
     query: String,
     case_sensitive: bool,
+    file_type_filter: String,
 ) -> Result<Vec<SearchFileResult>, String> {
     if query.is_empty() {
         return Ok(Vec::new());
@@ -141,6 +192,10 @@ pub async fn search_files(
     } else {
         query.to_lowercase()
     };
+    let extensions = extensions_from_filter(&file_type_filter);
+    if extensions.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let mut results: Vec<SearchFileResult> = Vec::new();
 
@@ -154,11 +209,7 @@ pub async fn search_files(
                 .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
         })
         .filter(|e| {
-            e.file_type().is_file()
-                && e.path()
-                    .extension()
-                    .map(|ext| ext.eq_ignore_ascii_case("md"))
-                    .unwrap_or(false)
+            e.file_type().is_file() && is_extension_in(e.path(), &extensions)
         })
     {
         let path = entry.path();

@@ -1,5 +1,5 @@
 import { useAppDispatch } from "../context/AppContext";
-import { openFolderDialog, readDirectoryTree } from "./tauri";
+import { getSupportedFileTypes, openFolderDialog, readDirectoryTree } from "./tauri";
 import { addRecentFolder } from "./recentFiles";
 
 export function useOpenFolder() {
@@ -14,7 +14,11 @@ export function useOpenFolder() {
     addRecentFolder(folderPath);
 
     try {
-      const tree = await readDirectoryTree(folderPath);
+      const [tree, supportedTypes] = await Promise.all([
+        readDirectoryTree(folderPath),
+        getSupportedFileTypes(),
+      ]);
+      dispatch({ type: "SET_SUPPORTED_FILE_TYPES", payload: supportedTypes });
       dispatch({ type: "SET_FILE_TREE", payload: tree });
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: String(err) });

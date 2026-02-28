@@ -15,3 +15,9 @@ export interface SearchFileResult {
   file_name: string;
   matches: SearchMatch[];
 }
+
+export interface SupportedFileType {
+  id: string;
+  label: string;
+  extensions: string[];
+}
