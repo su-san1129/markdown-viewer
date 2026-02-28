@@ -90,21 +90,46 @@ jobs:
           mkdir -p /tmp/installers
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir /tmp/installers
 
-      - name: Collect installer files
+      - name: Prepare canonical installer files
         id: files
         shell: bash
         run: |
           set -euo pipefail
-          find /tmp/installers -type f \
-            \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
-            > /tmp/release-assets.txt
+          mkdir -p /tmp/release-upload
 
-          if [ ! -s /tmp/release-assets.txt ]; then
-            echo "No installer assets found in downloaded artifacts."
+          pick_one() {
+            local root="$1"
+            shift
+            for ext in "$@"; do
+              local found
+              found=$(find "$root" -type f -iname "*.${ext}" | head -n 1 || true)
+              if [ -n "$found" ]; then
+                echo "$found"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          mac_file=$(pick_one /tmp/installers/installers-macOS dmg pkg) || {
+            echo "macOS installer not found."
             exit 1
-          fi
+          }
+          windows_file=$(pick_one /tmp/installers/installers-Windows msi exe) || {
+            echo "Windows installer not found."
+            exit 1
+          }
+          linux_file=$(pick_one /tmp/installers/installers-Linux AppImage deb rpm) || {
+            echo "Linux installer not found."
+            exit 1
+          }
 
-          echo "Will upload these files:"
+          cp "$mac_file" /tmp/release-upload/view-bomber-macos.${mac_file##*.}
+          cp "$windows_file" /tmp/release-upload/view-bomber-windows.${windows_file##*.}
+          cp "$linux_file" /tmp/release-upload/view-bomber-linux.${linux_file##*.}
+
+          find /tmp/release-upload -type f > /tmp/release-assets.txt
+          echo "Will upload canonical files:"
           cat /tmp/release-assets.txt
 
       - name: Upload artifacts to release assets

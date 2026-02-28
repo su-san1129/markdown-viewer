@@ -5,15 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>View Bomber Downloads</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap");
+
       :root {
-        color-scheme: light;
-        --bg: #f5f7fb;
-        --card: #ffffff;
-        --text: #17212f;
-        --muted: #5b6678;
-        --line: #d6deea;
-        --accent: #0055d4;
-        --accent-hover: #003f9f;
+        --bg-top: #091420;
+        --bg-bottom: #102030;
+        --surface: rgba(11, 24, 38, 0.72);
+        --line: rgba(255, 255, 255, 0.16);
+        --text: #e9f2ff;
+        --muted: #9cb0ca;
+        --glow: #66d1ff;
+        --mac: #5ce1c5;
+        --win: #5ea5ff;
+        --linux: #ffd36b;
       }
 
       * {
@@ -22,120 +26,188 @@
 
       body {
         margin: 0;
-        font-family: "Avenir Next", "Segoe UI", sans-serif;
-        background: radial-gradient(circle at 20% 0%, #e8f1ff 0%, var(--bg) 45%), var(--bg);
-        color: var(--text);
         min-height: 100vh;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(1000px 540px at -10% -10%, rgba(92, 225, 197, 0.18), transparent 55%),
+          radial-gradient(900px 540px at 110% 0%, rgba(94, 165, 255, 0.2), transparent 58%),
+          linear-gradient(165deg, var(--bg-top), var(--bg-bottom));
       }
 
       .wrap {
-        max-width: 880px;
+        max-width: 980px;
         margin: 0 auto;
-        padding: 48px 20px 56px;
+        padding: 56px 20px 64px;
       }
 
       .hero {
-        margin-bottom: 24px;
+        margin-bottom: 20px;
+      }
+
+      .kicker {
+        display: inline-block;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: #c9dcf5;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: rgba(255, 255, 255, 0.04);
       }
 
       h1 {
         margin: 0;
-        font-size: clamp(1.75rem, 4vw, 2.4rem);
-        line-height: 1.1;
+        font-size: clamp(34px, 5vw, 56px);
+        letter-spacing: -0.02em;
+        line-height: 0.96;
       }
 
-      p {
-        margin: 10px 0 0;
+      .subtitle {
+        max-width: 700px;
+        margin-top: 14px;
         color: var(--muted);
+        font-size: clamp(15px, 2.3vw, 18px);
       }
 
       .panel {
-        background: var(--card);
+        border-radius: 22px;
         border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 20px;
-        box-shadow: 0 6px 22px rgba(24, 52, 88, 0.08);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+        backdrop-filter: blur(8px);
+        padding: 18px;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
       }
 
       .meta {
+        margin-bottom: 14px;
+        color: #d8e8ff;
+        font-weight: 500;
         font-size: 0.95rem;
-        margin-bottom: 16px;
       }
 
       .buttons {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 10px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
       }
 
       .btn {
         display: block;
         text-decoration: none;
-        background: var(--accent);
-        color: #fff;
-        border-radius: 10px;
-        padding: 12px 14px;
-        font-weight: 600;
-        transition: background-color 120ms ease;
-      }
-
-      .btn:hover {
-        background: var(--accent-hover);
+        color: #04131f;
+        border-radius: 14px;
+        padding: 15px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+        font-weight: 700;
+        animation: rise 380ms ease both;
       }
 
       .btn span {
         display: block;
+        margin-top: 4px;
         font-size: 0.82rem;
-        opacity: 0.86;
-        font-weight: 500;
-        margin-top: 3px;
+        color: rgba(3, 18, 30, 0.78);
+        font-weight: 600;
+      }
+
+      .btn.mac {
+        background: linear-gradient(135deg, var(--mac), #b9fff1);
+      }
+
+      .btn.win {
+        background: linear-gradient(135deg, var(--win), #d0e4ff);
+      }
+
+      .btn.linux {
+        background: linear-gradient(135deg, var(--linux), #ffe9b7);
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        filter: saturate(1.05);
+        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.24);
       }
 
       .footer-links {
         margin-top: 16px;
         display: flex;
-        gap: 14px;
+        gap: 16px;
         flex-wrap: wrap;
       }
 
       .footer-links a {
-        color: var(--accent);
+        color: #c4e9ff;
+        text-decoration-color: rgba(196, 233, 255, 0.45);
       }
 
       .muted {
+        margin-top: 12px;
         color: var(--muted);
       }
 
-      .hidden {
-        display: none;
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 860px) {
+        .buttons {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <main class="wrap">
       <section class="hero">
-        <h1>Download View Bomber</h1>
-        <p>Pick an installer from the latest published GitHub release.</p>
+        <div class="kicker">View Bomber</div>
+        <h1>Fast, direct installer downloads</h1>
+        <p class="subtitle">Choose your OS and download the latest build without opening the GitHub release page.</p>
       </section>
 
       <section class="panel">
-        <div id="status" class="meta">Loading latest release...</div>
-        <div id="buttons" class="buttons hidden"></div>
+        <div id="status" class="meta">Preparing direct download links...</div>
+
+        <div class="buttons">
+          <a id="macLink" class="btn mac" href="#" rel="noopener noreferrer">
+            Download for macOS
+            <span>Latest release installer</span>
+          </a>
+          <a id="winLink" class="btn win" href="#" rel="noopener noreferrer">
+            Download for Windows
+            <span>Latest release installer</span>
+          </a>
+          <a id="linuxLink" class="btn linux" href="#" rel="noopener noreferrer">
+            Download for Linux
+            <span>Latest release installer</span>
+          </a>
+        </div>
 
         <div class="footer-links">
           <a id="allReleases" href="#" rel="noopener noreferrer" target="_blank">All releases</a>
           <a id="latestRelease" href="#" rel="noopener noreferrer" target="_blank">Latest release notes</a>
         </div>
-      </section>
 
-      <p class="muted" style="margin-top: 16px">
-        Tip: if your platform button is missing, open "All releases" and download from assets directly.
-      </p>
+        <p class="muted">If a direct file is missing, open "All releases" and pick from Assets.</p>
+      </section>
     </main>
 
     <script>
       const statusEl = document.getElementById("status");
-      const buttonsEl = document.getElementById("buttons");
+      const macLinkEl = document.getElementById("macLink");
+      const winLinkEl = document.getElementById("winLink");
+      const linuxLinkEl = document.getElementById("linuxLink");
       const allReleasesEl = document.getElementById("allReleases");
       const latestReleaseEl = document.getElementById("latestRelease");
 
@@ -151,66 +223,19 @@
           }
         }
 
-        const hardcoded = { owner: "su-san1129", repo: "view-bomber" };
-        return hardcoded;
-      }
-
-      function classifyAsset(name) {
-        const lower = name.toLowerCase();
-
-        if (lower.endsWith(".dmg") || lower.endsWith(".pkg") || lower.endsWith(".app.tar.gz")) {
-          return { label: "macOS", hint: name };
-        }
-
-        if (lower.endsWith(".msi") || lower.endsWith(".exe")) {
-          return { label: "Windows", hint: name };
-        }
-
-        if (lower.endsWith(".appimage") || lower.endsWith(".deb") || lower.endsWith(".rpm")) {
-          return { label: "Linux", hint: name };
-        }
-
-        return null;
-      }
-
-      function pickPrimaryAssets(assets) {
-        const priorities = {
-          macOS: [".dmg", ".pkg", ".app.tar.gz"],
-          Windows: [".msi", ".exe"],
-          Linux: [".appimage", ".deb", ".rpm"]
-        };
-
-        const grouped = { macOS: [], Windows: [], Linux: [] };
-
-        for (const asset of assets) {
-          const classified = classifyAsset(asset.name);
-          if (!classified) continue;
-          grouped[classified.label].push(asset);
-        }
-
-        const picked = [];
-        for (const [platform, list] of Object.entries(grouped)) {
-          if (list.length === 0) continue;
-
-          const order = priorities[platform];
-          list.sort((a, b) => {
-            const aIndex = order.findIndex((ext) => a.name.toLowerCase().endsWith(ext));
-            const bIndex = order.findIndex((ext) => b.name.toLowerCase().endsWith(ext));
-            return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex);
-          });
-
-          picked.push({ platform, asset: list[0] });
-        }
-
-        return picked;
+        return { owner: "su-san1129", repo: "view-bomber" };
       }
 
       async function main() {
         const { owner, repo } = detectRepo();
         const latestApi = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
         const releasesUrl = `https://github.com/${owner}/${repo}/releases`;
+        const latestDownloadBase = `https://github.com/${owner}/${repo}/releases/latest/download`;
 
         allReleasesEl.href = releasesUrl;
+        macLinkEl.href = `${latestDownloadBase}/view-bomber-macos.dmg`;
+        winLinkEl.href = `${latestDownloadBase}/view-bomber-windows.msi`;
+        linuxLinkEl.href = `${latestDownloadBase}/view-bomber-linux.AppImage`;
 
         try {
           const response = await fetch(latestApi, {
@@ -225,31 +250,9 @@
 
           const release = await response.json();
           latestReleaseEl.href = release.html_url || releasesUrl;
-
-          const assets = Array.isArray(release.assets) ? release.assets : [];
-          const picked = pickPrimaryAssets(assets);
-
           statusEl.textContent = `Latest: ${release.name || release.tag_name || "(untitled)"}`;
-
-          if (picked.length === 0) {
-            statusEl.textContent += " (no installer assets detected yet)";
-            return;
-          }
-
-          buttonsEl.innerHTML = "";
-          for (const { platform, asset } of picked) {
-            const a = document.createElement("a");
-            a.className = "btn";
-            a.href = asset.browser_download_url;
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            a.innerHTML = `${platform}<span>${asset.name}</span>`;
-            buttonsEl.appendChild(a);
-          }
-
-          buttonsEl.classList.remove("hidden");
         } catch (err) {
-          statusEl.textContent = "Could not load latest release. Use \"All releases\" instead.";
+          statusEl.textContent = "Direct links are ready. If one fails, use \"All releases\".";
           console.error(err);
         }
       }
