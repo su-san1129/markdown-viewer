@@ -8,7 +8,8 @@
     "!node_modules",
     "!dist",
     "!src-tauri/target",
-    "!THIRD_PARTY_NOTICES.md"
+    "!THIRD_PARTY_NOTICES.md",
+    "!APACHE_NOTICES.md"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.95.11.wasm",
