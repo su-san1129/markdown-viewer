@@ -15,12 +15,23 @@ type HatchPatternLine = {
 type HatchPattern = {
   lines: HatchPatternLine[];
 };
+type StrokeStyle = { dash: number[]; lineWidth: number; alpha: number; };
 
 type Primitive =
-  | { kind: "line"; layer: string; start: Point; end: Point; }
-  | { kind: "polyline"; layer: string; points: Point[]; closed: boolean; }
+  | { kind: "line"; layer: string; start: Point; end: Point; stroke: StrokeStyle; }
+  | { kind: "polyline"; layer: string; points: Point[]; closed: boolean; stroke: StrokeStyle; }
+  | {
+    kind: "point";
+    layer: string;
+    position: Point;
+    size: number;
+    mode: number;
+    stroke: StrokeStyle;
+  }
+  | { kind: "arrow"; layer: string; tip: Point; tail: Point; size: number; stroke: StrokeStyle; }
+  | { kind: "face"; layer: string; points: Point[]; }
   | { kind: "hatch"; layer: string; loops: Point[][]; solid: boolean; pattern: HatchPattern; }
-  | { kind: "circle"; layer: string; center: Point; radius: number; }
+  | { kind: "circle"; layer: string; center: Point; radius: number; stroke: StrokeStyle; }
   | {
     kind: "arc";
     layer: string;
@@ -28,6 +39,7 @@ type Primitive =
     radius: number;
     startAngle: number;
     endAngle: number;
+    stroke: StrokeStyle;
   }
   | {
     kind: "ellipse";
@@ -37,8 +49,9 @@ type Primitive =
     axisRatio: number;
     startAngle: number;
     endAngle: number;
+    stroke: StrokeStyle;
   }
-  | { kind: "spline"; layer: string; points: Point[]; }
+  | { kind: "spline"; layer: string; points: Point[]; stroke: StrokeStyle; }
   | {
     kind: "text";
     layer: string;
@@ -47,6 +60,10 @@ type Primitive =
     height: number;
     rotation: number;
     multiline: boolean;
+    align: CanvasTextAlign;
+    baseline: CanvasTextBaseline;
+    widthFactor: number;
+    alpha: number;
   };
 
 type LayerSummary = { name: string; count: number; };
@@ -55,6 +72,7 @@ interface ParsedDxf {
   primitives: Primitive[];
   bounds: Bounds;
   layers: LayerSummary[];
+  layerStroke: Record<string, StrokeStyle>;
 }
 
 function isHatchPrimitive(
@@ -121,17 +139,57 @@ function extendBoundsForPrimitive(bounds: Bounds, primitive: Primitive) {
     return;
   }
 
+  if (primitive.kind === "face") {
+    for (const point of primitive.points) {
+      updateBounds(bounds, point);
+    }
+    return;
+  }
+
+  if (primitive.kind === "point") {
+    updateBounds(bounds, primitive.position);
+    return;
+  }
+
+  if (primitive.kind === "arrow") {
+    updateBounds(bounds, primitive.tip);
+    updateBounds(bounds, primitive.tail);
+    const dx = primitive.tail.x - primitive.tip.x;
+    const dy = primitive.tail.y - primitive.tip.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy;
+    const py = ux;
+    const base = {
+      x: primitive.tip.x + ux * primitive.size,
+      y: primitive.tip.y + uy * primitive.size
+    };
+    const half = primitive.size * 0.45;
+    updateBounds(bounds, { x: base.x + px * half, y: base.y + py * half });
+    updateBounds(bounds, { x: base.x - px * half, y: base.y - py * half });
+    return;
+  }
+
   if (primitive.kind === "text") {
     const lines = primitive.text.split("\n");
-    const maxLine = lines.reduce((acc, line) => Math.max(acc, line.length), 0);
+    const maxLine = lines.reduce((acc, line) => Math.max(acc, line.length), 0)
+      * primitive.widthFactor;
     const textW = Math.max(maxLine * primitive.height * 0.6, primitive.height);
     const textH = Math.max(lines.length * primitive.height * 1.2, primitive.height);
 
+    let xShift = 0;
+    if (primitive.align === "center") xShift = -textW / 2;
+    if (primitive.align === "right" || primitive.align === "end") xShift = -textW;
+    let yShift = 0;
+    if (primitive.baseline === "middle") yShift = textH / 2;
+    if (primitive.baseline === "top" || primitive.baseline === "hanging") yShift = textH;
+
     const corners = [
-      { x: 0, y: 0 },
-      { x: textW, y: 0 },
-      { x: textW, y: textH },
-      { x: 0, y: textH }
+      { x: xShift, y: yShift },
+      { x: xShift + textW, y: yShift },
+      { x: xShift + textW, y: yShift - textH },
+      { x: xShift, y: yShift - textH }
     ];
     const cos = Math.cos(primitive.rotation);
     const sin = Math.sin(primitive.rotation);
@@ -216,6 +274,28 @@ function pickPoint(entity: Record<string, unknown>): Point | null {
   return null;
 }
 
+function asPoint(raw: unknown): Point | null {
+  if (!raw || typeof raw !== "object") return null;
+  const point = raw as { x?: unknown; y?: unknown; };
+  if (typeof point.x !== "number" || typeof point.y !== "number") return null;
+  return { x: point.x, y: point.y };
+}
+
+function pointDistanceToSegment(point: Point, start: Point, end: Point): number {
+  const vx = end.x - start.x;
+  const vy = end.y - start.y;
+  const wx = point.x - start.x;
+  const wy = point.y - start.y;
+  const c1 = vx * wx + vy * wy;
+  if (c1 <= 0) return Math.hypot(point.x - start.x, point.y - start.y);
+  const c2 = vx * vx + vy * vy;
+  if (c2 <= 1e-12) return Math.hypot(point.x - start.x, point.y - start.y);
+  if (c2 <= c1) return Math.hypot(point.x - end.x, point.y - end.y);
+  const t = c1 / c2;
+  const proj = { x: start.x + t * vx, y: start.y + t * vy };
+  return Math.hypot(point.x - proj.x, point.y - proj.y);
+}
+
 function normalizeMText(raw: string): string {
   return raw
     .replace(/\\P/gi, "\n")
@@ -223,6 +303,188 @@ function normalizeMText(raw: string): string {
     .replace(/\\[A-Za-z][^;]*;/g, "")
     .replace(/[{}]/g, "")
     .trim();
+}
+
+function readEntityText(entity: Record<string, unknown>, multiline: boolean): string {
+  const textCandidates = [
+    entity.text,
+    entity.string,
+    entity.value,
+    entity.defaultValue,
+    entity.prompt,
+    entity.tag
+  ];
+  for (const candidate of textCandidates) {
+    const value = String(candidate ?? "").trim();
+    if (value.length === 0) continue;
+    return multiline ? normalizeMText(value) : value;
+  }
+  return "";
+}
+
+function textAlignmentFromTextEntity(entity: Record<string, unknown>): {
+  align: CanvasTextAlign;
+  baseline: CanvasTextBaseline;
+} {
+  const h = Number(entity.halign ?? entity.horizontalAlignment ?? entity.attachmentPoint ?? 0);
+  const v = Number(entity.valign ?? entity.verticalAlignment ?? 0);
+  let align: CanvasTextAlign = "left";
+  let baseline: CanvasTextBaseline = "bottom";
+
+  if (h === 1 || h === 4) align = "center";
+  if (h === 2 || h === 5) align = "right";
+  if (h === 3) align = "left";
+
+  if (v === 1) baseline = "bottom";
+  if (v === 2) baseline = "middle";
+  if (v === 3) baseline = "top";
+  return { align, baseline };
+}
+
+function textAlignmentFromMTextEntity(entity: Record<string, unknown>): {
+  align: CanvasTextAlign;
+  baseline: CanvasTextBaseline;
+} {
+  const attachment = Math.floor(Number(entity.attachmentPoint ?? 7));
+  const col = ((attachment - 1) % 3) + 1;
+  const row = Math.floor((attachment - 1) / 3) + 1;
+  let align: CanvasTextAlign = "left";
+  let baseline: CanvasTextBaseline = "top";
+  if (col === 2) align = "center";
+  if (col === 3) align = "right";
+  if (row === 2) baseline = "middle";
+  if (row === 3) baseline = "bottom";
+  return { align, baseline };
+}
+
+function normalizeDashPattern(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const values = raw
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && Math.abs(value) > 1e-9)
+    .map((value) => Math.max(Math.abs(value), 0.1));
+  if (values.length < 2) return [];
+  if (values.length % 2 === 1) values.push(values[values.length - 1]);
+  return values;
+}
+
+function extractLineTypePatterns(
+  tables: Record<string, unknown> | undefined
+): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  const ltypeTable = (tables?.ltype ?? tables?.lineType ?? null) as Record<string, unknown> | null;
+  const ltypes = (ltypeTable?.ltypes ?? ltypeTable?.items ?? null) as
+    | Record<string, Record<string, unknown>>
+    | null;
+  if (ltypes && typeof ltypes === "object") {
+    for (const [name, value] of Object.entries(ltypes)) {
+      const dash = normalizeDashPattern(
+        value.pattern ?? value.patterns ?? value.elements ?? value.dashArray
+      );
+      if (dash.length > 0) out[name.toUpperCase()] = dash;
+    }
+  }
+
+  if (!out.DASHED) out.DASHED = [6, 3];
+  if (!out.HIDDEN) out.HIDDEN = [4, 2];
+  if (!out.CENTER) out.CENTER = [10, 3, 2, 3];
+  if (!out.PHANTOM) out.PHANTOM = [10, 3, 2, 3, 2, 3];
+  return out;
+}
+
+function extractLayerLineTypes(
+  tables: Record<string, unknown> | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const layerTable = (tables?.layer ?? tables?.layers ?? null) as Record<string, unknown> | null;
+  const layers = (layerTable?.layers ?? layerTable?.items ?? null) as
+    | Record<string, Record<string, unknown>>
+    | null;
+  if (!layers || typeof layers !== "object") return out;
+  for (const [name, value] of Object.entries(layers)) {
+    const lineType = String(value.lineTypeName ?? value.lineType ?? value.ltype ?? "CONTINUOUS");
+    out[name] = lineType.toUpperCase();
+  }
+  return out;
+}
+
+function extractLayerLineWeights(
+  tables: Record<string, unknown> | undefined
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const layerTable = (tables?.layer ?? tables?.layers ?? null) as Record<string, unknown> | null;
+  const layers = (layerTable?.layers ?? layerTable?.items ?? null) as
+    | Record<string, Record<string, unknown>>
+    | null;
+  if (!layers || typeof layers !== "object") return out;
+  for (const [name, value] of Object.entries(layers)) {
+    const raw = Number(value.lineWeight ?? value.lineweight ?? -1);
+    if (Number.isFinite(raw) && raw >= 0) out[name] = raw;
+  }
+  return out;
+}
+
+function extractLayerTransparency(
+  tables: Record<string, unknown> | undefined
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const layerTable = (tables?.layer ?? tables?.layers ?? null) as Record<string, unknown> | null;
+  const layers = (layerTable?.layers ?? layerTable?.items ?? null) as
+    | Record<string, Record<string, unknown>>
+    | null;
+  if (!layers || typeof layers !== "object") return out;
+  for (const [name, value] of Object.entries(layers)) {
+    const raw = Number(value.transparency ?? value.alpha ?? Number.NaN);
+    if (Number.isFinite(raw)) out[name] = raw;
+  }
+  return out;
+}
+
+function lineWeightToPixels(raw: number): number {
+  if (!Number.isFinite(raw) || raw < 0) return 1.1;
+  const mm = raw / 100;
+  const px = mm * (96 / 25.4);
+  return Math.min(8, Math.max(0.7, px));
+}
+
+function transparencyToAlpha(raw: number | undefined): number {
+  if (!Number.isFinite(raw)) return 1;
+  const value = Number(raw);
+  if (value >= 0 && value <= 1) return Math.min(1, Math.max(0, value));
+  if (value >= 0 && value <= 255) return Math.min(1, Math.max(0, 1 - value / 255));
+  const t = value & 0xff;
+  return Math.min(1, Math.max(0, 1 - t / 255));
+}
+
+function resolveStrokeStyle(
+  entity: Record<string, unknown>,
+  layer: string,
+  lineTypePatterns: Record<string, number[]>,
+  layerLineTypes: Record<string, string>,
+  layerLineWeights: Record<string, number>,
+  layerTransparency: Record<string, number>
+): StrokeStyle {
+  const rawType = String(
+    entity.lineTypeName ?? entity.lineType ?? entity.ltype ?? "BYLAYER"
+  ).toUpperCase();
+  const lineTypeName = rawType === "BYLAYER" || rawType === "BYBLOCK"
+    ? (layerLineTypes[layer] ?? "CONTINUOUS")
+    : rawType;
+  const dash = lineTypePatterns[lineTypeName] ?? [];
+
+  const rawLineWeight = Number(entity.lineWeight ?? entity.lineweight ?? -1);
+  const lineWeightValue = Number.isFinite(rawLineWeight) && rawLineWeight >= 0
+    ? rawLineWeight
+    : (layerLineWeights[layer] ?? -1);
+  const lineWidth = lineWeightToPixels(lineWeightValue);
+
+  const rawTransparency = Number(entity.transparency ?? entity.alpha ?? Number.NaN);
+  const transparencyValue = Number.isFinite(rawTransparency)
+    ? rawTransparency
+    : layerTransparency[layer];
+  const alpha = transparencyToAlpha(transparencyValue);
+
+  return { dash, lineWidth, alpha };
 }
 
 function normalizeEllipseAngles(
@@ -390,6 +652,176 @@ function transformPoints(points: Point[], matrix: Matrix2D): Point[] {
   return points.map((point) => applyPoint(matrix, point));
 }
 
+type WeightedPoint = { x: number; y: number; w: number; };
+
+function generateOpenUniformKnots(controlCount: number, degree: number): number[] {
+  const knotCount = controlCount + degree + 1;
+  const interior = knotCount - 2 * (degree + 1);
+  const knots: number[] = [];
+  for (let i = 0; i <= degree; i += 1) knots.push(0);
+  for (let i = 1; i <= interior; i += 1) knots.push(i / (interior + 1));
+  for (let i = 0; i <= degree; i += 1) knots.push(1);
+  return knots;
+}
+
+function normalizeSplineKnots(raw: unknown, controlCount: number, degree: number): number[] {
+  const expected = controlCount + degree + 1;
+  const values = Array.isArray(raw)
+    ? raw.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+    : [];
+  if (values.length < expected) {
+    return generateOpenUniformKnots(controlCount, degree);
+  }
+  const knots = values.slice(0, expected);
+  for (let i = 1; i < knots.length; i += 1) {
+    if (knots[i] < knots[i - 1]) {
+      knots.sort((a, b) => a - b);
+      break;
+    }
+  }
+  const first = knots[0];
+  const last = knots[knots.length - 1];
+  if (!Number.isFinite(first) || !Number.isFinite(last) || Math.abs(last - first) < 1e-9) {
+    return generateOpenUniformKnots(controlCount, degree);
+  }
+  return knots;
+}
+
+function findKnotSpan(u: number, knots: number[], controlCount: number, degree: number): number {
+  const n = controlCount - 1;
+  if (u >= knots[n + 1]) return n;
+  if (u <= knots[degree]) return degree;
+  let low = degree;
+  let high = n + 1;
+  let mid = Math.floor((low + high) / 2);
+  while (u < knots[mid] || u >= knots[mid + 1]) {
+    if (u < knots[mid]) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+    mid = Math.floor((low + high) / 2);
+  }
+  return mid;
+}
+
+function evaluateNurbsPoint(
+  controlPoints: WeightedPoint[],
+  degree: number,
+  knots: number[],
+  u: number
+): Point | null {
+  const count = controlPoints.length;
+  if (count === 0) return null;
+  const span = findKnotSpan(u, knots, count, degree);
+  const d: WeightedPoint[] = [];
+  for (let j = 0; j <= degree; j += 1) {
+    const source = controlPoints[span - degree + j];
+    d.push({ x: source.x, y: source.y, w: source.w });
+  }
+  for (let r = 1; r <= degree; r += 1) {
+    for (let j = degree; j >= r; j -= 1) {
+      const i = span - degree + j;
+      const left = knots[i];
+      const right = knots[i + degree - r + 1];
+      const denom = right - left;
+      const alpha = Math.abs(denom) < 1e-12 ? 0 : (u - left) / denom;
+      d[j] = {
+        x: (1 - alpha) * d[j - 1].x + alpha * d[j].x,
+        y: (1 - alpha) * d[j - 1].y + alpha * d[j].y,
+        w: (1 - alpha) * d[j - 1].w + alpha * d[j].w
+      };
+    }
+  }
+  const out = d[degree];
+  if (!Number.isFinite(out.w) || Math.abs(out.w) < 1e-12) return null;
+  return { x: out.x / out.w, y: out.y / out.w };
+}
+
+function splineToPolyline(entity: Record<string, unknown>): Point[] {
+  const fitPoints = Array.isArray(entity.fitPoints) ? (entity.fitPoints as Point[]) : [];
+  const controlPoints = Array.isArray(entity.controlPoints)
+    ? (entity.controlPoints as Point[])
+    : [];
+  if (controlPoints.length < 2 && fitPoints.length < 2) return [];
+
+  if (controlPoints.length >= 2) {
+    const maxDegree = Math.max(controlPoints.length - 1, 1);
+    const degree = Math.min(
+      maxDegree,
+      Math.max(1, Math.floor(Number(entity.degree ?? entity.order ?? 3)))
+    );
+    const weightsRaw = Array.isArray(entity.weights) ? (entity.weights as unknown[]) : [];
+    const weightedControl = controlPoints.map((point, idx) => {
+      const rawWeight = Number(weightsRaw[idx] ?? 1);
+      const weight = Number.isFinite(rawWeight) && Math.abs(rawWeight) > 1e-9 ? rawWeight : 1;
+      return { x: point.x * weight, y: point.y * weight, w: weight };
+    });
+    const knots = normalizeSplineKnots(
+      entity.knotValues ?? entity.knots ?? entity.knotVector,
+      controlPoints.length,
+      degree
+    );
+    const minU = knots[degree];
+    const maxU = knots[controlPoints.length];
+    if (Number.isFinite(minU) && Number.isFinite(maxU) && maxU > minU) {
+      const controlBounds = emptyBounds();
+      for (const p of controlPoints) {
+        updateBounds(controlBounds, p);
+      }
+      const diag = Math.hypot(
+        controlBounds.maxX - controlBounds.minX,
+        controlBounds.maxY - controlBounds.minY
+      );
+      const tolerance = Math.max(diag / 2000, 1e-4);
+      const maxDepth = 11;
+      const points: Point[] = [];
+
+      const refine = (u0: number, p0: Point, u1: number, p1: Point, depth: number) => {
+        if (depth >= maxDepth) {
+          points.push(p1);
+          return;
+        }
+        const um = (u0 + u1) / 2;
+        const pm = evaluateNurbsPoint(weightedControl, degree, knots, um);
+        if (!pm) {
+          points.push(p1);
+          return;
+        }
+        const deviation = pointDistanceToSegment(pm, p0, p1);
+        if (deviation <= tolerance) {
+          points.push(p1);
+          return;
+        }
+        refine(u0, p0, um, pm, depth + 1);
+        refine(um, pm, u1, p1, depth + 1);
+      };
+
+      const spanStart = degree;
+      const spanEnd = controlPoints.length - 1;
+      let started = false;
+      for (let i = spanStart; i <= spanEnd; i += 1) {
+        const u0 = knots[i];
+        const u1 = knots[i + 1];
+        if (!Number.isFinite(u0) || !Number.isFinite(u1) || u1 - u0 <= 1e-10) continue;
+        const p0 = evaluateNurbsPoint(weightedControl, degree, knots, u0);
+        const p1 = evaluateNurbsPoint(weightedControl, degree, knots, u1);
+        if (!p0 || !p1) continue;
+        if (!started) {
+          points.push(p0);
+          started = true;
+        }
+        refine(u0, p0, u1, p1, 0);
+      }
+      const deduped = dedupeSequentialPoints(points);
+      if (deduped.length >= 2) return deduped;
+    }
+  }
+
+  const fallback = fitPoints.length >= 2 ? fitPoints : controlPoints;
+  return dedupeSequentialPoints(fallback.map((point) => ({ x: point.x, y: point.y })));
+}
+
 function extractHatchLoops(entity: Record<string, unknown>, matrix: Matrix2D): Point[][] {
   const loopsRaw = Array.isArray(entity.boundaryLoops)
     ? (entity.boundaryLoops as Record<string, unknown>[])
@@ -458,16 +890,9 @@ function extractHatchLoops(entity: Record<string, unknown>, matrix: Matrix2D): P
       }
 
       if (edgeType === "SPLINE") {
-        const fitPoints = Array.isArray(edge.fitPoints) ? (edge.fitPoints as Point[]) : [];
-        const controlPoints = Array.isArray(edge.controlPoints)
-          ? (edge.controlPoints as Point[])
-          : [];
-        const src = fitPoints.length >= 2 ? fitPoints : controlPoints;
-        if (src.length < 2) continue;
-        appendSegmentPoints(
-          loopPoints,
-          transformPoints(src.map((p) => ({ x: p.x, y: p.y })), matrix)
-        );
+        const points = splineToPolyline(edge);
+        if (points.length < 2) continue;
+        appendSegmentPoints(loopPoints, transformPoints(points, matrix));
       }
     }
 
@@ -477,6 +902,188 @@ function extractHatchLoops(entity: Record<string, unknown>, matrix: Matrix2D): P
   }
 
   return loops.filter((loop) => loop.length >= 3);
+}
+
+function toPointArray(raw: unknown): Point[] {
+  if (!Array.isArray(raw)) return [];
+  const points: Point[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const point = item as { x?: unknown; y?: unknown; };
+    if (typeof point.x === "number" && typeof point.y === "number") {
+      points.push({ x: point.x, y: point.y });
+    }
+  }
+  return points;
+}
+
+function extractFacePoints(entity: Record<string, unknown>): Point[] {
+  const fromVertices = toPointArray(entity.vertices);
+  if (fromVertices.length >= 3) return fromVertices;
+
+  const fromPoints = toPointArray(entity.points);
+  if (fromPoints.length >= 3) return fromPoints;
+
+  const keys = [
+    "v0",
+    "v1",
+    "v2",
+    "v3",
+    "firstCorner",
+    "secondCorner",
+    "thirdCorner",
+    "fourthCorner"
+  ];
+  const points: Point[] = [];
+  for (const key of keys) {
+    const value = entity[key];
+    if (!value || typeof value !== "object") continue;
+    const point = value as { x?: unknown; y?: unknown; };
+    if (typeof point.x === "number" && typeof point.y === "number") {
+      points.push({ x: point.x, y: point.y });
+    }
+  }
+  return points;
+}
+
+function dedupeSequentialPoints(points: Point[]): Point[] {
+  if (points.length === 0) return points;
+  const deduped: Point[] = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = deduped[deduped.length - 1];
+    const curr = points[i];
+    if (Math.hypot(curr.x - prev.x, curr.y - prev.y) > 1e-9) {
+      deduped.push(curr);
+    }
+  }
+  if (deduped.length >= 2) {
+    const first = deduped[0];
+    const last = deduped[deduped.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= 1e-9) {
+      deduped.pop();
+    }
+  }
+  return deduped;
+}
+
+function extractLeaderPoints(entity: Record<string, unknown>): Point[] {
+  const direct = toPointArray(entity.vertices);
+  if (direct.length >= 2) return direct;
+
+  const points = toPointArray(entity.points);
+  if (points.length >= 2) return points;
+
+  const leaderLines = Array.isArray(entity.leaderLines)
+    ? (entity.leaderLines as Record<string, unknown>[])
+    : [];
+  for (const leader of leaderLines) {
+    const leaderPoints = toPointArray(leader.vertices);
+    if (leaderPoints.length >= 2) return leaderPoints;
+  }
+
+  const contextData = Array.isArray(entity.contextData)
+    ? (entity.contextData as Record<string, unknown>[])
+    : [];
+  for (const context of contextData) {
+    const contextPoints = toPointArray(context.vertices);
+    if (contextPoints.length >= 2) return contextPoints;
+  }
+
+  const start = pickPoint(entity);
+  const endRaw = entity.end as Point | undefined;
+  if (start && endRaw && typeof endRaw.x === "number" && typeof endRaw.y === "number") {
+    return [start, { x: endRaw.x, y: endRaw.y }];
+  }
+
+  return [];
+}
+
+function toVector(raw: unknown): Point | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as { x?: unknown; y?: unknown; };
+  if (typeof value.x !== "number" || typeof value.y !== "number") return null;
+  return { x: value.x, y: value.y };
+}
+
+function getLeaderArrowSize(entity: Record<string, unknown>, matrix: Matrix2D): number {
+  const scaleX = Math.hypot(matrix.a, matrix.b);
+  const scaleY = Math.hypot(matrix.c, matrix.d);
+  const avgScale = Math.max((scaleX + scaleY) / 2, 0.0001);
+  const raw = Number(
+    entity.arrowHeadSize
+      ?? entity.arrowSize
+      ?? entity.dimasz
+      ?? entity.dimensionArrowSize
+      ?? entity.dimScale
+      ?? 2.5
+  );
+  return Math.max(Math.abs(raw) * avgScale, 0.1);
+}
+
+function hasLeaderArrow(entity: Record<string, unknown>): boolean {
+  const explicit = entity.hasArrowHead ?? entity.arrowHeadOn ?? entity.enableArrowHead;
+  if (typeof explicit === "boolean") return explicit;
+  return true;
+}
+
+function extractLeaderLandingPoint(
+  entity: Record<string, unknown>,
+  matrix: Matrix2D,
+  leaderEnd: Point
+): Point | null {
+  const directCandidates = [
+    entity.landingPoint,
+    entity.doglegPoint,
+    entity.lastLeaderPoint,
+    entity.textAttachmentPoint
+  ];
+  for (const candidate of directCandidates) {
+    const point = asPoint(candidate);
+    if (!point) continue;
+    const mapped = applyPoint(matrix, point);
+    if (Math.hypot(mapped.x - leaderEnd.x, mapped.y - leaderEnd.y) > 1e-6) {
+      return mapped;
+    }
+  }
+
+  const contexts = Array.isArray(entity.contextData)
+    ? (entity.contextData as Record<string, unknown>[])
+    : [];
+  for (const context of contexts) {
+    const contextCandidates = [
+      context.landingPoint,
+      context.doglegPoint,
+      context.lastLeaderPoint,
+      context.textAttachmentPoint
+    ];
+    for (const candidate of contextCandidates) {
+      const point = asPoint(candidate);
+      if (!point) continue;
+      const mapped = applyPoint(matrix, point);
+      if (Math.hypot(mapped.x - leaderEnd.x, mapped.y - leaderEnd.y) > 1e-6) {
+        return mapped;
+      }
+    }
+
+    const doglegVecRaw = toVector(context.doglegVector) ?? toVector(entity.doglegVector);
+    const doglegLengthRaw = Number(
+      context.doglegLength ?? entity.doglegLength ?? entity.landingGap ?? 0
+    );
+    if (doglegVecRaw && Number.isFinite(doglegLengthRaw) && Math.abs(doglegLengthRaw) > 1e-9) {
+      const vec = applyVector(matrix, doglegVecRaw);
+      const len = Math.hypot(vec.x, vec.y);
+      if (len > 1e-9) {
+        const unit = { x: vec.x / len, y: vec.y / len };
+        const length = Math.abs(doglegLengthRaw);
+        return {
+          x: leaderEnd.x + unit.x * length,
+          y: leaderEnd.y + unit.y * length
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 function extractHatchPattern(
@@ -503,8 +1110,8 @@ function extractHatchPattern(
       .map((value) => Number(value))
       .filter((value) => Number.isFinite(value))
       .map((value) => {
-        if (Math.abs(value) < 1e-9) return 1.5;
-        return Math.max(Math.abs(value) * 8, 1.5);
+        if (Math.abs(value) < 1e-9) return 0.1;
+        return Math.max(Math.abs(value), 0.1);
       });
     return dash.length >= 2 ? dash : [];
   };
@@ -520,11 +1127,11 @@ function extractHatchPattern(
       const dy = Number(def.deltaY ?? def.offsetY ?? 0);
       const spacingFromDelta = Math.abs(dx * nX + dy * nY);
       const spacingFromField = Number(def.spacing ?? entity.patternScale ?? entity.scale ?? 1);
-      const spacing = Math.max(Math.abs(spacingFromDelta || spacingFromField) * 8, 4);
+      const spacing = Math.max(Math.abs(spacingFromDelta || spacingFromField), 0.1);
 
-      const originX = Number(def.x ?? def.originX ?? def.baseX ?? 0) * 8;
-      const originY = Number(def.y ?? def.originY ?? def.baseY ?? 0) * 8;
-      const dashOffset = Number(def.dashOffset ?? def.offsetX ?? 0) * 8;
+      const originX = Number(def.x ?? def.originX ?? def.baseX ?? 0);
+      const originY = Number(def.y ?? def.originY ?? def.baseY ?? 0);
+      const dashOffset = Number(def.dashOffset ?? 0);
 
       return {
         angle,
@@ -539,7 +1146,7 @@ function extractHatchPattern(
 
   if (lines.length === 0) {
     const angle = toRadians(Number(entity.patternAngle ?? entity.angle ?? 45));
-    const spacing = Math.max(Math.abs(Number(entity.patternScale ?? entity.scale ?? 1)) * 8, 4);
+    const spacing = Math.max(Math.abs(Number(entity.patternScale ?? entity.scale ?? 1)), 0.1);
     lines.push({
       angle,
       spacing,
@@ -563,44 +1170,136 @@ function extractHatchPattern(
   return { solid, pattern: { lines } };
 }
 
+function signedLoopArea(loop: Point[]): number {
+  if (loop.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < loop.length; i += 1) {
+    const a = loop[i];
+    const b = loop[(i + 1) % loop.length];
+    area += a.x * b.y - b.x * a.y;
+  }
+  return area / 2;
+}
+
+function pointInPolygon(point: Point, polygon: Point[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersects = ((yi > point.y) !== (yj > point.y))
+      && (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function normalizeHatchLoops(loops: Point[][]): Point[][] {
+  if (!Array.isArray(loops) || loops.length === 0) return loops;
+
+  const polygonLoops = loops
+    .map((loop) => loop.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
+    .filter((loop) => loop.length >= 3);
+  if (polygonLoops.length <= 1) return polygonLoops;
+
+  const ordered = polygonLoops
+    .map((loop, idx) => ({
+      idx,
+      loop,
+      area: signedLoopArea(loop),
+      absArea: Math.abs(signedLoopArea(loop))
+    }))
+    .sort((a, b) => b.absArea - a.absArea);
+
+  const depth = Array.from({ length: ordered.length }, () => 0);
+  for (let i = 0; i < ordered.length; i += 1) {
+    const probe = ordered[i].loop[0];
+    let parentDepth = -1;
+    let parentArea = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < ordered.length; j += 1) {
+      if (i === j) continue;
+      if (ordered[j].absArea <= ordered[i].absArea) continue;
+      if (!pointInPolygon(probe, ordered[j].loop)) continue;
+      if (ordered[j].absArea < parentArea) {
+        parentArea = ordered[j].absArea;
+        parentDepth = depth[j];
+      }
+    }
+    depth[i] = parentDepth + 1;
+  }
+
+  return ordered.map((entry, idx) => {
+    const isOuter = depth[idx] % 2 === 0;
+    const isCcw = entry.area > 0;
+    if ((isOuter && isCcw) || (!isOuter && !isCcw)) {
+      return entry.loop;
+    }
+    return [...entry.loop].reverse();
+  });
+}
+
 function strokeHatchPattern(
   ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  pattern: HatchPattern
+  map: (p: Point) => Point,
+  bounds: Bounds,
+  pattern: HatchPattern,
+  scale: number
 ) {
-  const diag = Math.hypot(width, height);
-  const cx = width / 2;
-  const cy = height / 2;
-
-  const drawSet = (line: HatchPatternLine) => {
-    const angle = line.angle;
-    const dirX = Math.cos(angle);
-    const dirY = -Math.sin(angle);
-    const nX = -dirY;
-    const nY = dirX;
-    const baseNormal = nX * line.originX + nY * line.originY;
-    const baseAlong = dirX * line.originX + dirY * line.originY;
-
-    for (let offset = -diag; offset <= diag; offset += line.spacing) {
-      const shifted = offset + baseNormal;
-      const sx = cx + nX * shifted + dirX * (baseAlong - diag);
-      const sy = cy + nY * shifted + dirY * (baseAlong - diag);
-      const ex = cx + nX * shifted + dirX * (baseAlong + diag);
-      const ey = cy + nY * shifted + dirY * (baseAlong + diag);
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(ex, ey);
-    }
-  };
+  const corners = [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY }
+  ];
 
   const drawPatternLine = (line: HatchPatternLine) => {
-    ctx.setLineDash(line.dash);
     const dirX = Math.cos(line.angle);
-    const dirY = -Math.sin(line.angle);
-    const originAlong = dirX * line.originX + dirY * line.originY;
-    ctx.lineDashOffset = line.dashOffset + originAlong;
+    const dirY = Math.sin(line.angle);
+    const nX = -dirY;
+    const nY = dirX;
+
+    const base = { x: line.originX, y: line.originY };
+    const baseNormal = base.x * nX + base.y * nY;
+
+    let normalMin = Number.POSITIVE_INFINITY;
+    let normalMax = Number.NEGATIVE_INFINITY;
+    let alongMin = Number.POSITIVE_INFINITY;
+    let alongMax = Number.NEGATIVE_INFINITY;
+    for (const corner of corners) {
+      const normal = corner.x * nX + corner.y * nY;
+      const along = corner.x * dirX + corner.y * dirY;
+      normalMin = Math.min(normalMin, normal);
+      normalMax = Math.max(normalMax, normal);
+      alongMin = Math.min(alongMin, along);
+      alongMax = Math.max(alongMax, along);
+    }
+
+    const spacing = Math.max(line.spacing, 1e-4);
+    const start = Math.floor((normalMin - baseNormal) / spacing) - 1;
+    const end = Math.ceil((normalMax - baseNormal) / spacing) + 1;
+    const alongPad = Math.max((alongMax - alongMin) * 0.15, 1);
+
+    const dashPixels = line.dash.map((value) => Math.max(value * scale, 1));
+    ctx.setLineDash(dashPixels.length >= 2 ? dashPixels : []);
+    ctx.lineDashOffset = line.dashOffset * scale;
     ctx.beginPath();
-    drawSet(line);
+    for (let k = start; k <= end; k += 1) {
+      const normal = baseNormal + k * spacing;
+      const p0 = {
+        x: nX * normal + dirX * (alongMin - alongPad),
+        y: nY * normal + dirY * (alongMin - alongPad)
+      };
+      const p1 = {
+        x: nX * normal + dirX * (alongMax + alongPad),
+        y: nY * normal + dirY * (alongMax + alongPad)
+      };
+      const s = map(p0);
+      const e = map(p1);
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+    }
     ctx.stroke();
   };
 
@@ -672,6 +1371,7 @@ function parseDxf(content: string): ParsedDxf {
     | {
       entities?: unknown[];
       blocks?: Record<string, { entities?: unknown[]; }>;
+      tables?: Record<string, unknown>;
     }
     | null
     | undefined;
@@ -681,6 +1381,11 @@ function parseDxf(content: string): ParsedDxf {
 
   const entities = Array.isArray(result.entities) ? result.entities : [];
   const blocks = result.blocks && typeof result.blocks === "object" ? result.blocks : {};
+  const tables = result.tables && typeof result.tables === "object" ? result.tables : undefined;
+  const lineTypePatterns = extractLineTypePatterns(tables);
+  const layerLineTypes = extractLayerLineTypes(tables);
+  const layerLineWeights = extractLayerLineWeights(tables);
+  const layerTransparency = extractLayerTransparency(tables);
 
   const primitives: Primitive[] = [];
   const layerCounts = new Map<string, number>();
@@ -701,6 +1406,14 @@ function parseDxf(content: string): ParsedDxf {
     const type = String(entity.type ?? "");
     const layer = getLayerName(entity.layer);
     const matrixIsIdentity = isIdentityMatrix(matrix);
+    const stroke = resolveStrokeStyle(
+      entity,
+      layer,
+      lineTypePatterns,
+      layerLineTypes,
+      layerLineWeights,
+      layerTransparency
+    );
 
     if (type === "LINE") {
       const start = entity.start as Point | undefined;
@@ -710,7 +1423,8 @@ function parseDxf(content: string): ParsedDxf {
         kind: "line",
         layer,
         start: applyPoint(matrix, start),
-        end: applyPoint(matrix, end)
+        end: applyPoint(matrix, end),
+        stroke
       });
       return;
     }
@@ -724,15 +1438,49 @@ function parseDxf(content: string): ParsedDxf {
       );
       if (points.length < 2) return;
       const closed = Boolean(entity.shape ?? entity.closed);
-      pushPrimitive({ kind: "polyline", layer, points, closed });
+      pushPrimitive({ kind: "polyline", layer, points, closed, stroke });
       return;
     }
 
     if (type === "HATCH") {
-      const loops = extractHatchLoops(entity, matrix);
+      const loops = normalizeHatchLoops(extractHatchLoops(entity, matrix));
       if (loops.length === 0) return;
       const { solid, pattern } = extractHatchPattern(entity);
       pushPrimitive({ kind: "hatch", layer, loops, solid, pattern });
+      return;
+    }
+
+    if (type === "3DFACE" || type === "SOLID" || type === "TRACE") {
+      const points = dedupeSequentialPoints(transformPoints(extractFacePoints(entity), matrix));
+      if (points.length < 3) return;
+      pushPrimitive({ kind: "face", layer, points });
+      return;
+    }
+
+    if (type === "LEADER" || type === "MLEADER") {
+      const points = dedupeSequentialPoints(transformPoints(extractLeaderPoints(entity), matrix));
+      if (points.length < 2) return;
+      pushPrimitive({ kind: "polyline", layer, points, closed: false, stroke });
+      if (hasLeaderArrow(entity)) {
+        pushPrimitive({
+          kind: "arrow",
+          layer,
+          tip: points[0],
+          tail: points[1],
+          size: getLeaderArrowSize(entity, matrix),
+          stroke
+        });
+      }
+      const landing = extractLeaderLandingPoint(entity, matrix, points[points.length - 1]);
+      if (landing) {
+        pushPrimitive({
+          kind: "line",
+          layer,
+          start: points[points.length - 1],
+          end: landing,
+          stroke
+        });
+      }
       return;
     }
 
@@ -741,7 +1489,7 @@ function parseDxf(content: string): ParsedDxf {
       const radius = Number(entity.radius ?? 0);
       if (!center || radius <= 0) return;
       if (matrixIsIdentity) {
-        pushPrimitive({ kind: "circle", layer, center, radius });
+        pushPrimitive({ kind: "circle", layer, center, radius, stroke });
         return;
       }
 
@@ -757,7 +1505,8 @@ function parseDxf(content: string): ParsedDxf {
           kind: "circle",
           layer,
           center: transformedCenter,
-          radius: (axisXLen + axisYLen) / 2
+          radius: (axisXLen + axisYLen) / 2,
+          stroke
         });
         return;
       }
@@ -771,7 +1520,8 @@ function parseDxf(content: string): ParsedDxf {
         majorAxisEndPoint,
         axisRatio,
         startAngle: 0,
-        endAngle: Math.PI * 2
+        endAngle: Math.PI * 2,
+        stroke
       });
       return;
     }
@@ -783,14 +1533,14 @@ function parseDxf(content: string): ParsedDxf {
       const endAngle = toRadians(Number(entity.endAngle ?? 0));
       if (!center || radius <= 0) return;
       if (matrixIsIdentity) {
-        pushPrimitive({ kind: "arc", layer, center, radius, startAngle, endAngle });
+        pushPrimitive({ kind: "arc", layer, center, radius, startAngle, endAngle, stroke });
         return;
       }
       const points = ellipseToPoints(center, { x: radius, y: 0 }, 1, startAngle, endAngle, 72).map((
         point
       ) => applyPoint(matrix, point));
       if (points.length >= 2) {
-        pushPrimitive({ kind: "polyline", layer, points, closed: false });
+        pushPrimitive({ kind: "polyline", layer, points, closed: false, stroke });
       }
       return;
     }
@@ -812,7 +1562,7 @@ function parseDxf(content: string): ParsedDxf {
           90
         ).map((point) => applyPoint(matrix, point));
         if (points.length >= 2) {
-          pushPrimitive({ kind: "polyline", layer, points, closed: false });
+          pushPrimitive({ kind: "polyline", layer, points, closed: false, stroke });
         }
         return;
       }
@@ -823,26 +1573,23 @@ function parseDxf(content: string): ParsedDxf {
         majorAxisEndPoint,
         axisRatio,
         startAngle,
-        endAngle
+        endAngle,
+        stroke
       });
       return;
     }
 
     if (type === "SPLINE") {
-      const fitPoints = Array.isArray(entity.fitPoints) ? (entity.fitPoints as Point[]) : [];
-      const controlPoints = Array.isArray(entity.controlPoints)
-        ? (entity.controlPoints as Point[])
-        : [];
-      const sourcePoints = fitPoints.length >= 2 ? fitPoints : controlPoints;
-      if (sourcePoints.length < 2) return;
-      const points = sourcePoints.map((point) => applyPoint(matrix, { x: point.x, y: point.y }));
-      pushPrimitive({ kind: "spline", layer, points });
+      const splinePoints = splineToPolyline(entity);
+      if (splinePoints.length < 2) return;
+      const points = splinePoints.map((point) => applyPoint(matrix, point));
+      pushPrimitive({ kind: "spline", layer, points, stroke });
       return;
     }
 
-    if (type === "TEXT") {
+    if (type === "TEXT" || type === "ATTRIB" || type === "ATTDEF") {
       const position = pickPoint(entity);
-      const text = String(entity.text ?? entity.string ?? "").trim();
+      const text = readEntityText(entity, false);
       if (!position || text.length === 0) return;
       const scaleX = Math.hypot(matrix.a, matrix.b);
       const scaleY = Math.hypot(matrix.c, matrix.d);
@@ -850,6 +1597,8 @@ function parseDxf(content: string): ParsedDxf {
       const height = Math.max(Number(entity.textHeight ?? entity.height ?? 2.5) * textScale, 0.1);
       const rotation = toRadians(Number(entity.rotation ?? entity.angle ?? 0))
         + Math.atan2(matrix.b, matrix.a);
+      const { align, baseline } = textAlignmentFromTextEntity(entity);
+      const widthFactor = Math.max(Math.abs(Number(entity.xScale ?? entity.widthFactor ?? 1)), 0.1);
       pushPrimitive({
         kind: "text",
         layer,
@@ -857,15 +1606,18 @@ function parseDxf(content: string): ParsedDxf {
         position: applyPoint(matrix, position),
         height,
         rotation,
-        multiline: false
+        multiline: false,
+        align,
+        baseline,
+        widthFactor,
+        alpha: stroke.alpha
       });
       return;
     }
 
     if (type === "MTEXT") {
       const position = pickPoint(entity);
-      const source = String(entity.text ?? entity.string ?? "").trim();
-      const text = normalizeMText(source);
+      const text = readEntityText(entity, true);
       if (!position || text.length === 0) return;
       const scaleX = Math.hypot(matrix.a, matrix.b);
       const scaleY = Math.hypot(matrix.c, matrix.d);
@@ -873,6 +1625,8 @@ function parseDxf(content: string): ParsedDxf {
       const height = Math.max(Number(entity.height ?? entity.textHeight ?? 2.5) * textScale, 0.1);
       const rotation = toRadians(Number(entity.rotation ?? entity.angle ?? 0))
         + Math.atan2(matrix.b, matrix.a);
+      const { align, baseline } = textAlignmentFromMTextEntity(entity);
+      const widthFactor = Math.max(Math.abs(Number(entity.widthFactor ?? 1)), 0.1);
       pushPrimitive({
         kind: "text",
         layer,
@@ -880,7 +1634,27 @@ function parseDxf(content: string): ParsedDxf {
         position: applyPoint(matrix, position),
         height,
         rotation,
-        multiline: true
+        multiline: true,
+        align,
+        baseline,
+        widthFactor,
+        alpha: stroke.alpha
+      });
+      return;
+    }
+
+    if (type === "POINT") {
+      const base = asPoint(entity.position) ?? asPoint(entity.point) ?? pickPoint(entity);
+      if (!base) return;
+      const mode = Math.floor(Number(entity.pdmode ?? entity.pointMode ?? 0));
+      const size = Number(entity.pdsize ?? entity.pointSize ?? 0);
+      pushPrimitive({
+        kind: "point",
+        layer,
+        position: applyPoint(matrix, base),
+        mode: Number.isFinite(mode) ? mode : 0,
+        size: Number.isFinite(size) ? size : 0,
+        stroke
       });
       return;
     }
@@ -896,22 +1670,31 @@ function parseDxf(content: string): ParsedDxf {
       const sx = Number(entity.xScale ?? entity.xscale ?? 1);
       const sy = Number(entity.yScale ?? entity.yscale ?? 1);
       const rotation = toRadians(Number(entity.rotation ?? entity.angle ?? 0));
+      const columns = Math.max(1, Math.floor(Number(entity.columnCount ?? entity.columns ?? 1)));
+      const rows = Math.max(1, Math.floor(Number(entity.rowCount ?? entity.rows ?? 1)));
+      const columnSpacing = Number(entity.columnSpacing ?? entity.colSpacing ?? 0);
+      const rowSpacing = Number(entity.rowSpacing ?? entity.rowSpace ?? 0);
 
       const local = multiplyMatrix(
         translationMatrix(insertion.x, insertion.y),
         multiplyMatrix(rotationMatrix(rotation), scaleMatrix(sx, sy))
       );
-      const next = multiplyMatrix(matrix, local);
 
-      for (const child of block.entities as Record<string, unknown>[]) {
-        expandEntity(child, next, [...blockStack, blockName], depth + 1);
-      }
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const arrayOffset = translationMatrix(column * columnSpacing, row * rowSpacing);
+          const next = multiplyMatrix(matrix, multiplyMatrix(local, arrayOffset));
+          for (const child of block.entities as Record<string, unknown>[]) {
+            expandEntity(child, next, [...blockStack, blockName], depth + 1);
+          }
 
-      const attribs = Array.isArray(entity.attribs)
-        ? (entity.attribs as Record<string, unknown>[])
-        : [];
-      for (const attrib of attribs) {
-        expandEntity({ ...attrib, type: "TEXT" }, next, blockStack, depth + 1);
+          const attribs = Array.isArray(entity.attribs)
+            ? (entity.attribs as Record<string, unknown>[])
+            : [];
+          for (const attrib of attribs) {
+            expandEntity(attrib, next, blockStack, depth + 1);
+          }
+        }
       }
       return;
     }
@@ -923,21 +1706,41 @@ function parseDxf(content: string): ParsedDxf {
           expandEntity(child, matrix, [...blockStack, blockName], depth + 1);
         }
       }
+      const defA = entity.definitionPoint as Point | undefined;
+      const defB = entity.definitionPoint2 as Point | undefined;
+      if (defA && defB) {
+        pushPrimitive({
+          kind: "line",
+          layer,
+          start: applyPoint(matrix, defA),
+          end: applyPoint(matrix, defB),
+          stroke
+        });
+      }
+
       const dimText = String(entity.text ?? "").trim();
       if (dimText.length > 0 && dimText !== "<>") {
         const position = pickPoint(entity);
         if (position) {
           const scaleX = Math.hypot(matrix.a, matrix.b);
           const scaleY = Math.hypot(matrix.c, matrix.d);
-          const height = Math.max(2.5 * ((scaleX + scaleY) / 2), 0.1);
+          const styleHeight = Number(entity.textHeight ?? entity.dimtxt ?? entity.height ?? 2.5);
+          const height = Math.max(styleHeight * ((scaleX + scaleY) / 2), 0.1);
+          const textAngle = toRadians(
+            Number(entity.textRotation ?? entity.rotation ?? entity.angle ?? 0)
+          );
           pushPrimitive({
             kind: "text",
             layer,
             text: dimText,
             position: applyPoint(matrix, position),
             height,
-            rotation: Math.atan2(matrix.b, matrix.a),
-            multiline: false
+            rotation: textAngle + Math.atan2(matrix.b, matrix.a),
+            multiline: false,
+            align: "center",
+            baseline: "middle",
+            widthFactor: 1,
+            alpha: stroke.alpha
           });
         }
       }
@@ -953,8 +1756,19 @@ function parseDxf(content: string): ParsedDxf {
   const layers = Array.from(layerCounts.entries())
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const layerStroke: Record<string, StrokeStyle> = {};
+  for (const layer of layers) {
+    layerStroke[layer.name] = resolveStrokeStyle(
+      { lineTypeName: "BYLAYER", lineWeight: -1, transparency: Number.NaN },
+      layer.name,
+      lineTypePatterns,
+      layerLineTypes,
+      layerLineWeights,
+      layerTransparency
+    );
+  }
 
-  return { primitives, bounds, layers };
+  return { primitives, bounds, layers, layerStroke };
 }
 
 function DxfCanvasViewer({ content }: { content: string; }) {
@@ -1076,7 +1890,10 @@ function DxfCanvasViewer({ content }: { content: string; }) {
     });
 
     const hatchPrimitives = visiblePrimitives.filter(isHatchPrimitive);
-    const strokePrimitives = visiblePrimitives.filter((primitive) => !isHatchPrimitive(primitive));
+    const facePrimitives = visiblePrimitives.filter((primitive) => primitive.kind === "face");
+    const strokePrimitives = visiblePrimitives.filter((primitive) =>
+      !isHatchPrimitive(primitive) && primitive.kind !== "face"
+    );
 
     for (const primitive of hatchPrimitives) {
       ctx.save();
@@ -1103,16 +1920,46 @@ function DxfCanvasViewer({ content }: { content: string; }) {
         ctx.save();
         ctx.clip("evenodd");
         ctx.globalAlpha = 0.55;
-        strokeHatchPattern(ctx, width, height, primitive.pattern);
+        strokeHatchPattern(ctx, map, visibleBounds, primitive.pattern, scale);
         ctx.restore();
       }
       ctx.restore();
     }
 
+    for (const primitive of facePrimitives) {
+      if (primitive.points.length < 3) continue;
+      const color = layerColor(primitive.layer);
+      ctx.beginPath();
+      const first = map(primitive.points[0]);
+      ctx.moveTo(first.x, first.y);
+      for (let i = 1; i < primitive.points.length; i += 1) {
+        const point = map(primitive.points[i]);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.14;
+      ctx.fill("nonzero");
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     for (const primitive of strokePrimitives) {
       ctx.beginPath();
       ctx.strokeStyle = layerColor(primitive.layer);
-      ctx.lineWidth = 1.1;
+      const layerStroke = parsed.layerStroke[primitive.layer]
+        ?? { dash: [], lineWidth: 1.1, alpha: 1 };
+      const stroke = "stroke" in primitive ? primitive.stroke : layerStroke;
+      ctx.lineWidth = stroke.lineWidth;
+      const dash = stroke.dash;
+      ctx.setLineDash(
+        dash.length >= 2 ? dash.map((value) => Math.max(value * scale * 0.45, 1)) : []
+      );
+      ctx.lineDashOffset = 0;
+      ctx.globalAlpha = stroke.alpha;
 
       if (primitive.kind === "line") {
         const a = map(primitive.start);
@@ -1134,6 +1981,35 @@ function DxfCanvasViewer({ content }: { content: string; }) {
           ctx.closePath();
         }
         ctx.stroke();
+        continue;
+      }
+
+      if (primitive.kind === "arrow") {
+        ctx.setLineDash([]);
+        const tip = map(primitive.tip);
+        const tail = map(primitive.tail);
+        const dx = tail.x - tip.x;
+        const dy = tail.y - tip.y;
+        const len = Math.hypot(dx, dy);
+        if (len <= 1e-6) continue;
+        const ux = dx / len;
+        const uy = dy / len;
+        const px = -uy;
+        const py = ux;
+        const sizePx = Math.max(primitive.size * scale, 5);
+        const base = { x: tip.x + ux * sizePx, y: tip.y + uy * sizePx };
+        const wing = sizePx * 0.45;
+        const left = { x: base.x + px * wing, y: base.y + py * wing };
+        const right = { x: base.x - px * wing, y: base.y - py * wing };
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(left.x, left.y);
+        ctx.lineTo(right.x, right.y);
+        ctx.closePath();
+        ctx.fillStyle = layerColor(primitive.layer);
+        ctx.globalAlpha = stroke.alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1;
         continue;
       }
 
@@ -1190,7 +2066,63 @@ function DxfCanvasViewer({ content }: { content: string; }) {
         continue;
       }
 
+      if (primitive.kind === "point") {
+        ctx.setLineDash([]);
+        const p = map(primitive.position);
+        const modelSize = Math.abs(primitive.size) * scale;
+        const viewportSize = Math.min(width, height);
+        const sizePx = Math.max(
+          primitive.size > 0
+            ? modelSize
+            : primitive.size < 0
+            ? (viewportSize * Math.abs(primitive.size)) / 100
+            : 6,
+          2
+        );
+        const half = sizePx / 2;
+        const mode = Math.abs(primitive.mode);
+        const baseMode = mode & 31;
+        const drawDot = baseMode === 0;
+        const drawNone = baseMode === 1;
+        const drawPlus = baseMode === 2 || baseMode === 4;
+        const drawCross = baseMode === 3 || baseMode === 4;
+        const drawCircle = (mode & 32) === 32;
+        const drawSquare = (mode & 64) === 64;
+
+        if (drawPlus) {
+          ctx.moveTo(p.x - half, p.y);
+          ctx.lineTo(p.x + half, p.y);
+          ctx.moveTo(p.x, p.y - half);
+          ctx.lineTo(p.x, p.y + half);
+        }
+        if (drawCross) {
+          ctx.moveTo(p.x - half, p.y - half);
+          ctx.lineTo(p.x + half, p.y + half);
+          ctx.moveTo(p.x - half, p.y + half);
+          ctx.lineTo(p.x + half, p.y - half);
+        }
+        if (drawDot) {
+          ctx.fillStyle = layerColor(primitive.layer);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(1.5, half / 2), 0, Math.PI * 2);
+          ctx.fill();
+        } else if (drawNone && !drawCircle && !drawSquare && !drawPlus && !drawCross) {
+          continue;
+        }
+        if (drawCircle) {
+          ctx.moveTo(p.x + half, p.y);
+          ctx.arc(p.x, p.y, half, 0, Math.PI * 2);
+        }
+        if (drawSquare) {
+          ctx.rect(p.x - half, p.y - half, sizePx, sizePx);
+        }
+        ctx.stroke();
+        continue;
+      }
+
       if (primitive.kind === "text") {
+        ctx.setLineDash([]);
+        ctx.globalAlpha = primitive.alpha;
         const p = map(primitive.position);
         const lines = primitive.text.split("\n");
         const fontSize = Math.max(primitive.height * scale, 9);
@@ -1198,21 +2130,28 @@ function DxfCanvasViewer({ content }: { content: string; }) {
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(-primitive.rotation);
+        ctx.scale(primitive.widthFactor, 1);
         ctx.fillStyle = layerColor(primitive.layer);
         ctx.font = `${fontSize}px "Segoe UI", sans-serif`;
-        ctx.textBaseline = "bottom";
-        ctx.textAlign = "left";
+        ctx.textBaseline = primitive.baseline;
+        ctx.textAlign = primitive.align;
 
         if (primitive.multiline) {
           const lineHeight = fontSize * 1.2;
+          const baselineAdjust = primitive.baseline === "top"
+            ? lineHeight
+            : primitive.baseline === "middle"
+            ? lineHeight / 2
+            : 0;
           for (let i = 0; i < lines.length; i += 1) {
-            ctx.fillText(lines[i], 0, -(i * lineHeight));
+            ctx.fillText(lines[i], 0, baselineAdjust + i * lineHeight);
           }
         } else {
           ctx.fillText(primitive.text, 0, 0);
         }
 
         ctx.restore();
+        ctx.globalAlpha = 1;
       }
     }
   }, [parsed, visibleBounds, visiblePrimitives, viewport, zoom, pan]);
