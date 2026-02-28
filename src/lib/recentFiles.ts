@@ -1,4 +1,4 @@
-const STORAGE_KEY = "markdown-viewer:recent-folders";
+const STORAGE_KEY = "view-bomber:recent-folders";
 const MAX_RECENT = 8;
 
 export interface RecentFolder {

@@ -1,6 +1,9 @@
 mod commands;
 
-use commands::{get_supported_file_types, read_directory_tree, read_file_content, search_files};
+use commands::{
+    get_supported_file_types, read_directory_tree, read_docx_text, read_file_content, read_xlsx,
+    search_files,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +13,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_directory_tree,
             read_file_content,
+            read_xlsx,
+            read_docx_text,
             search_files,
             get_supported_file_types
         ])

@@ -678,6 +678,46 @@ mark.find-highlight-current {
   background-color: var(--md-table-hover);
 }
 
+/* ===== XLSX viewer ===== */
+.xlsx-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.xlsx-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-ui);
+}
+
+.xlsx-tab:hover {
+  background-color: var(--bg-hover);
+}
+
+.xlsx-tab.is-active {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  background-color: var(--bg-toolbar);
+}
+
+/* ===== DOCX viewer ===== */
+.docx-view {
+  color: var(--md-text);
+  font-size: var(--font-md);
+  line-height: 1.75;
+}
+
+.docx-view p {
+  margin-bottom: 14px;
+}
+
 /* ===== PDF viewer ===== */
 .pdf-viewer {
   display: flex;

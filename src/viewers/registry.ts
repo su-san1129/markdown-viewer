@@ -1,3 +1,4 @@
+import { docxViewerPlugin } from "./plugins/docx";
 import { htmlViewerPlugin } from "./plugins/html";
 import { imageViewerPlugin } from "./plugins/image";
 import { csvViewerPlugin } from "./plugins/csv";
@@ -6,6 +7,7 @@ import { jsonViewerPlugin } from "./plugins/json";
 import { markdownViewerPlugin } from "./plugins/markdown";
 import { pdfViewerPlugin } from "./plugins/pdf";
 import { textViewerPlugin } from "./plugins/text";
+import { xlsxViewerPlugin } from "./plugins/xlsx";
 import { getFileExtension } from "./fileTypes";
 import { isTextSpecialFileName } from "./textFormats";
 import type { ViewerPlugin } from "./types";
@@ -25,6 +27,8 @@ registerViewer(jsonViewerPlugin);
 registerViewer(csvViewerPlugin);
 registerViewer(dxfViewerPlugin);
 registerViewer(textViewerPlugin);
+registerViewer(xlsxViewerPlugin);
+registerViewer(docxViewerPlugin);
 registerViewer(imageViewerPlugin);
 registerViewer(pdfViewerPlugin);
 

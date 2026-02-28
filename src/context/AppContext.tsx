@@ -57,6 +57,8 @@ const initialState: AppState = {
       extensions: textExtensions,
       searchable: true
     },
+    { id: "spreadsheet", label: "Spreadsheet", extensions: ["xlsx", "xlsm"], searchable: true },
+    { id: "document", label: "Document", extensions: ["docx"], searchable: true },
     {
       id: "image",
       label: "Image",

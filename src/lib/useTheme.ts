@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 type Theme = "dark" | "light";
 
-const STORAGE_KEY = "markdown-viewer:theme";
+const STORAGE_KEY = "view-bomber:theme";
 
 function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);

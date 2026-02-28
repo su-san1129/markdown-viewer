@@ -1,8 +1,13 @@
+use calamine::{open_workbook_auto, Reader};
+use quick_xml::events::Event;
+use quick_xml::Reader as XmlReader;
 use serde::Serialize;
 use std::fs;
 use std::io::BufRead;
+use std::io::Read;
 use std::path::Path;
 use walkdir::WalkDir;
+use zip::ZipArchive;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
@@ -18,6 +23,22 @@ pub struct SupportedFileType {
     pub label: String,
     pub extensions: Vec<String>,
     pub searchable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct XlsxSheetData {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct XlsxData {
+    pub sheets: Vec<XlsxSheetData>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DocxTextData {
+    pub text: String,
 }
 
 fn text_extensions() -> Vec<String> {
@@ -86,6 +107,14 @@ fn text_special_file_names() -> Vec<String> {
     ]
 }
 
+fn spreadsheet_extensions() -> Vec<String> {
+    vec!["xlsx".to_string(), "xlsm".to_string()]
+}
+
+fn document_extensions() -> Vec<String> {
+    vec!["docx".to_string()]
+}
+
 fn supported_file_types() -> Vec<SupportedFileType> {
     vec![
         SupportedFileType {
@@ -122,6 +151,18 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             id: "text".to_string(),
             label: "Text".to_string(),
             extensions: text_extensions(),
+            searchable: true,
+        },
+        SupportedFileType {
+            id: "spreadsheet".to_string(),
+            label: "Spreadsheet".to_string(),
+            extensions: spreadsheet_extensions(),
+            searchable: true,
+        },
+        SupportedFileType {
+            id: "document".to_string(),
+            label: "Document".to_string(),
+            extensions: document_extensions(),
             searchable: true,
         },
         SupportedFileType {
@@ -235,6 +276,158 @@ fn extensions_from_filter(file_type_filter: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn has_extension(path: &Path, expected_extension: &str) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case(expected_extension))
+        .unwrap_or(false)
+}
+
+fn parse_xlsx(path: &Path) -> Result<XlsxData, String> {
+    let mut workbook = open_workbook_auto(path)
+        .map_err(|e| format!("Failed to open xlsx workbook: {}", e))?;
+    let sheet_names = workbook.sheet_names().to_owned();
+
+    let mut sheets: Vec<XlsxSheetData> = Vec::new();
+
+    for (index, name) in sheet_names.iter().enumerate() {
+        let range = match workbook.worksheet_range_at(index) {
+            Some(Ok(range)) => range,
+            Some(Err(err)) => {
+                return Err(format!("Failed to read sheet '{}': {}", name, err));
+            }
+            None => continue,
+        };
+
+        let rows = range
+            .rows()
+            .map(|row| row.iter().map(|cell| cell.to_string()).collect::<Vec<String>>())
+            .collect::<Vec<Vec<String>>>();
+
+        sheets.push(XlsxSheetData {
+            name: name.clone(),
+            rows,
+        });
+    }
+
+    Ok(XlsxData { sheets })
+}
+
+fn parse_docx_text(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|e| format!("Failed to open docx file: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read docx archive: {}", e))?;
+    let mut document_xml = archive
+        .by_name("word/document.xml")
+        .map_err(|e| format!("Failed to open word/document.xml: {}", e))?;
+
+    let mut xml = String::new();
+    document_xml
+        .read_to_string(&mut xml)
+        .map_err(|e| format!("Failed to read document XML: {}", e))?;
+
+    let mut reader = XmlReader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Text(event)) => {
+                if let Ok(decoded) = event.decode() {
+                    text.push_str(&decoded);
+                }
+            }
+            Ok(Event::End(event)) => {
+                if event.name().as_ref() == b"w:p" {
+                    text.push('\n');
+                }
+            }
+            Ok(Event::Empty(event)) => {
+                let name = event.name().as_ref().to_vec();
+                if name.as_slice() == b"w:tab" {
+                    text.push('\t');
+                } else if name.as_slice() == b"w:br" || name.as_slice() == b"w:cr" {
+                    text.push('\n');
+                }
+            }
+            Ok(_) => {}
+            Err(err) => {
+                return Err(format!("Failed to parse document XML: {}", err));
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(text)
+}
+
+fn search_line_matches(
+    lines: impl Iterator<Item = String>,
+    query: &str,
+    query_lower: &str,
+    case_sensitive: bool,
+) -> Vec<SearchMatch> {
+    let mut matches: Vec<SearchMatch> = Vec::new();
+    for (idx, line) in lines.enumerate() {
+        let matched = if case_sensitive {
+            line.contains(query)
+        } else {
+            line.to_lowercase().contains(query_lower)
+        };
+        if matched {
+            matches.push(SearchMatch {
+                line_number: idx + 1,
+                line_text: line,
+            });
+        }
+    }
+    matches
+}
+
+fn search_plain_text_file(path: &Path, query: &str, query_lower: &str, case_sensitive: bool) -> Vec<SearchMatch> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return Vec::new(),
+    };
+    let reader = std::io::BufReader::new(file);
+    search_line_matches(
+        reader.lines().map_while(Result::ok),
+        query,
+        query_lower,
+        case_sensitive,
+    )
+}
+
+fn search_xlsx_file(path: &Path, query: &str, query_lower: &str, case_sensitive: bool) -> Vec<SearchMatch> {
+    let workbook = match parse_xlsx(path) {
+        Ok(workbook) => workbook,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut lines: Vec<String> = Vec::new();
+    for sheet in &workbook.sheets {
+        for (row_index, row) in sheet.rows.iter().enumerate() {
+            lines.push(format!("[{}:{}] {}", sheet.name, row_index + 1, row.join(" | ")));
+        }
+    }
+    search_line_matches(lines.into_iter(), query, query_lower, case_sensitive)
+}
+
+fn search_docx_file(path: &Path, query: &str, query_lower: &str, case_sensitive: bool) -> Vec<SearchMatch> {
+    let text = match parse_docx_text(path) {
+        Ok(text) => text,
+        Err(_) => return Vec::new(),
+    };
+    search_line_matches(
+        text.lines().map(|line| line.to_string()),
+        query,
+        query_lower,
+        case_sensitive,
+    )
+}
+
 /// Recursively build a filtered directory tree containing only supported files
 /// and the directories that contain them. Hidden files/dirs are excluded.
 fn build_tree(dir: &Path) -> Vec<FileEntry> {
@@ -321,6 +514,38 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     fs::read_to_string(file_path).map_err(|e| format!("Failed to read file: {}", e))
 }
 
+#[tauri::command]
+pub async fn read_xlsx(path: String) -> Result<XlsxData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !has_extension(file_path, "xlsx") && !has_extension(file_path, "xlsm") {
+        return Err("Target file is not .xlsx or .xlsm".to_string());
+    }
+
+    parse_xlsx(file_path)
+}
+
+#[tauri::command]
+pub async fn read_docx_text(path: String) -> Result<DocxTextData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !has_extension(file_path, "docx") {
+        return Err("Target file is not .docx".to_string());
+    }
+
+    parse_docx_text(file_path).map(|text| DocxTextData { text })
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchMatch {
     pub line_number: usize,
@@ -366,39 +591,17 @@ pub async fn search_files(
     for entry in WalkDir::new(root)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            !is_hidden_path_except_text_special(e.path())
-        })
+        .filter(|e| !is_hidden_path_except_text_special(e.path()))
         .filter(|e| e.file_type().is_file() && matches_search_target(e.path(), &extensions, include_text_special))
     {
         let path = entry.path();
-        let file = match fs::File::open(path) {
-            Ok(f) => f,
-            Err(_) => continue,
+        let file_matches = if has_extension(path, "xlsx") || has_extension(path, "xlsm") {
+            search_xlsx_file(path, &query, &query_lower, case_sensitive)
+        } else if has_extension(path, "docx") {
+            search_docx_file(path, &query, &query_lower, case_sensitive)
+        } else {
+            search_plain_text_file(path, &query, &query_lower, case_sensitive)
         };
-
-        let reader = std::io::BufReader::new(file);
-        let mut file_matches: Vec<SearchMatch> = Vec::new();
-
-        for (idx, line) in reader.lines().enumerate() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-
-            let matched = if case_sensitive {
-                line.contains(&query)
-            } else {
-                line.to_lowercase().contains(&query_lower)
-            };
-
-            if matched {
-                file_matches.push(SearchMatch {
-                    line_number: idx + 1,
-                    line_text: line,
-                });
-            }
-        }
 
         if !file_matches.is_empty() {
             let file_name = path
@@ -439,6 +642,9 @@ mod tests {
         assert!(contains_extension(&extensions, "md"));
         assert!(contains_extension(&extensions, "txt"));
         assert!(contains_extension(&extensions, "dxf"));
+        assert!(contains_extension(&extensions, "xlsx"));
+        assert!(contains_extension(&extensions, "xlsm"));
+        assert!(contains_extension(&extensions, "docx"));
         assert!(!contains_extension(&extensions, "png"));
     }
 

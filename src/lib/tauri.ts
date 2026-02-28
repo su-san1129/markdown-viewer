@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { FileEntry, SearchFileResult, SupportedFileType } from "../types";
+import type {
+  DocxTextData,
+  FileEntry,
+  SearchFileResult,
+  SupportedFileType,
+  XlsxData
+} from "../types";
 
 export async function openFolderDialog(): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false });
@@ -31,4 +37,12 @@ export async function searchFiles(
 
 export async function getSupportedFileTypes(): Promise<SupportedFileType[]> {
   return invoke<SupportedFileType[]>("get_supported_file_types");
+}
+
+export async function readXlsx(path: string): Promise<XlsxData> {
+  return invoke<XlsxData>("read_xlsx", { path });
+}
+
+export async function readDocxText(path: string): Promise<DocxTextData> {
+  return invoke<DocxTextData>("read_docx_text", { path });
 }

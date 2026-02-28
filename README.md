@@ -25,6 +25,8 @@ multiple file types from a folder tree with fast preview, search, and format-spe
   `.swift`, `.kt`, `.dart`, `.lua`, `.php`, `.r`, `.properties`, `.editorconfig`, `.gitignore`,
   `.ndjson`, plus special names `Dockerfile`, `Makefile`, `GNUmakefile`, `.env*`, `.gitignore`,
   `.editorconfig` (line numbers + wrap toggle + syntax highlight + large-file partial render)
+- Spreadsheet: `.xlsx`, `.xlsm` (sheet tabs + table preview)
+- Document: `.docx` (paragraph text extraction preview)
 - Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`
 - PDF: `.pdf` (embedded `pdf.js` viewer with page navigation and zoom)
 
@@ -32,7 +34,7 @@ multiple file types from a folder tree with fast preview, search, and format-spe
 
 - `mise`
 - `bun` `1.3.10` (pinned in `mise.toml`)
-- Rust toolchain (`cargo`) for Tauri
+- Rust `1.93.0` toolchain (`cargo`) for Tauri
 - OS with Tauri desktop runtime support (macOS / Linux / Windows)
 
 ## Quick Start

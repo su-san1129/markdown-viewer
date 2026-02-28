@@ -22,3 +22,16 @@ export interface SupportedFileType {
   extensions: string[];
   searchable: boolean;
 }
+
+export interface XlsxSheetData {
+  name: string;
+  rows: string[][];
+}
+
+export interface XlsxData {
+  sheets: XlsxSheetData[];
+}
+
+export interface DocxTextData {
+  text: string;
+}
