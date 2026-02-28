@@ -10,8 +10,8 @@
     "tauri": "tauri",
     "format": "dprint fmt",
     "format:check": "dprint check",
-    "check": "npm run format:check && npm run lint && npx tsc --noEmit && cd src-tauri && cargo check",
-    "lint": "npm run lint:frontend && npm run lint:rust",
+    "check": "bun run format:check && bun run lint && bunx tsc --noEmit && cd src-tauri && cargo check",
+    "lint": "bun run lint:frontend && bun run lint:rust",
     "lint:frontend": "oxlint src vite.config.ts --deny-warnings",
     "lint:rust": "cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings",
     "prepare": "husky"

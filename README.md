@@ -1,53 +1,135 @@
 # View Bomber
 
-ローカルフォルダ内のドキュメントをまとめて閲覧する Tauri + React アプリです。
+View Bomber is a local desktop document viewer built with Tauri + React. It is designed to open
+multiple file types from a folder tree with fast preview, search, and format-specific rendering.
 
-## 対応ファイル
+## Features
 
-- `Markdown`: `.md`, `.markdown`
-- `HTML`: `.html`, `.htm`
-- `JSON`: `.json`（ツリービュー表示）
-- `CSV/TSV`: `.csv`, `.tsv`（テーブル表示、区切り文字自動推定: comma/tab/semicolon）
-- `Image`: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`
-- `PDF`: `.pdf`
-  - `pdf.js` ベースの内蔵ビューア（ページ移動 / ズーム / 幅合わせ）
+- Multi-format local file preview in a single app
+- Plugin-style viewer architecture (format-specific renderers)
+- Folder explorer with live file update watching
+- In-file search (`Cmd/Ctrl + F`) for text-based viewers
+- Sidebar text search across supported searchable formats
+- Strict quality pipeline with formatting + lint + type/build checks
 
-## 検索
+## Supported File Types
 
-- サイドバー検索はテキスト系ファイルのみ対象
-- 検索対象フィルタ: `All / Markdown / HTML / JSON`
-  - `CSV` も検索対象に含む
+- Markdown: `.md`, `.markdown`
+- HTML: `.html`, `.htm`
+- JSON: `.json` (tree view)
+- CSV/TSV: `.csv`, `.tsv` (table view, auto delimiter detection: comma/tab/semicolon)
+- Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`
+- PDF: `.pdf` (embedded `pdf.js` viewer with page navigation and zoom)
 
-## 使い方
+## Requirements
 
-```bash
-npm install
-npm run tauri dev
-```
+- `mise`
+- `bun` `1.3.10` (pinned in `mise.toml`)
+- Rust toolchain (`cargo`) for Tauri
+- OS with Tauri desktop runtime support (macOS / Linux / Windows)
 
-## フォーマット
-
-```bash
-npm run format
-npm run format:check
-```
-
-## Lint
+## Quick Start
 
 ```bash
-npm run lint:frontend # oxlint
-npm run lint:rust     # cargo clippy
-npm run lint          # 両方実行
-npm run check         # format + lint + ts + cargo check
+mise install
+bun install
 ```
 
-- Frontend は `oxlint --deny-warnings`（警告も失敗扱い）
-- Rust は `cargo clippy -- -D warnings`（警告も失敗扱い）
-- pre-commit で `lint-staged` が実行され、変更ファイルを `dprint + oxlint` で検査
+## Run the App
 
-## 技術スタック
+```bash
+bun run tauri dev
+```
+
+## Quality & Validation
+
+### Formatting
+
+```bash
+bun run format
+bun run format:check
+```
+
+### Lint
+
+```bash
+bun run lint:frontend
+bun run lint:rust
+bun run lint
+```
+
+- Frontend lint uses `oxlint` with `--deny-warnings`
+- Rust lint uses `clippy` with `-D warnings`
+
+### Full Project Check
+
+```bash
+bun run check
+```
+
+This runs:
+
+- format check
+- frontend lint + rust lint
+- TypeScript check
+- Rust check
+
+## CI Quality Gate
+
+The CI workflow (`.github/workflows/quality.yml`) enforces:
+
+1. `bun install --frozen-lockfile`
+2. `bun run format:check`
+3. `bun run lint:frontend`
+4. `bunx tsc --noEmit`
+5. `cargo clippy --all-targets --all-features -- -D warnings`
+6. `cargo check`
+
+## Pre-commit Automation
+
+Pre-commit is managed with Husky + lint-staged. On commit, staged files are checked/formatted with:
+
+- `dprint`
+- `oxlint` (for frontend source files)
+
+Hook entrypoint:
+
+- `.husky/pre-commit`
+
+## Troubleshooting
+
+### PDF fails to render
+
+- Make sure you are on the current code path that uses `pdf.js` byte loading via Tauri FS.
+- If you see permission errors for file reads, verify Tauri FS capability scopes in:
+  - `src-tauri/capabilities/default.json`
+
+### App icon changes are not visible in dev
+
+- `tauri dev` can show cached icons (especially on macOS Dock).
+- Fully quit the app and restart; if needed, restart Dock (`killall Dock`).
+- Final icon verification should be done with a built app (`tauri build`).
+
+### Formatting command errors due to cache permissions
+
+- `dprint` writes cache files under your user cache directory.
+- If your environment is sandboxed/restricted, run commands with appropriate permissions.
+
+## Repository Structure
+
+- `src/` — React frontend application
+- `src/viewers/` — viewer plugins and registry
+- `src-tauri/` — Tauri/Rust backend and desktop config
+- `.github/workflows/` — CI workflows
+- `.husky/` — git hooks
+- `mise.toml` — pinned local tool versions
+
+## Tech Stack
 
 - Tauri v2
 - React 19 + TypeScript
 - Vite
+- Bun
+- oxlint
+- dprint
 - pdf.js (`pdfjs-dist`)
