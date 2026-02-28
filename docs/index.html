@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>View Bomber Downloads</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --text: #17212f;
+        --muted: #5b6678;
+        --line: #d6deea;
+        --accent: #0055d4;
+        --accent-hover: #003f9f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 20% 0%, #e8f1ff 0%, var(--bg) 45%), var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 20px 56px;
+      }
+
+      .hero {
+        margin-bottom: 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.75rem, 4vw, 2.4rem);
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 10px 0 0;
+        color: var(--muted);
+      }
+
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 6px 22px rgba(24, 52, 88, 0.08);
+      }
+
+      .meta {
+        font-size: 0.95rem;
+        margin-bottom: 16px;
+      }
+
+      .buttons {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+
+      .btn {
+        display: block;
+        text-decoration: none;
+        background: var(--accent);
+        color: #fff;
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-weight: 600;
+        transition: background-color 120ms ease;
+      }
+
+      .btn:hover {
+        background: var(--accent-hover);
+      }
+
+      .btn span {
+        display: block;
+        font-size: 0.82rem;
+        opacity: 0.86;
+        font-weight: 500;
+        margin-top: 3px;
+      }
+
+      .footer-links {
+        margin-top: 16px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .footer-links a {
+        color: var(--accent);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="hero">
+        <h1>Download View Bomber</h1>
+        <p>Pick an installer from the latest published GitHub release.</p>
+      </section>
+
+      <section class="panel">
+        <div id="status" class="meta">Loading latest release...</div>
+        <div id="buttons" class="buttons hidden"></div>
+
+        <div class="footer-links">
+          <a id="allReleases" href="#" rel="noopener noreferrer" target="_blank">All releases</a>
+          <a id="latestRelease" href="#" rel="noopener noreferrer" target="_blank">Latest release notes</a>
+        </div>
+      </section>
+
+      <p class="muted" style="margin-top: 16px">
+        Tip: if your platform button is missing, open "All releases" and download from assets directly.
+      </p>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const buttonsEl = document.getElementById("buttons");
+      const allReleasesEl = document.getElementById("allReleases");
+      const latestReleaseEl = document.getElementById("latestRelease");
+
+      function detectRepo() {
+        const host = location.hostname;
+        const pathParts = location.pathname.split("/").filter(Boolean);
+
+        if (host.endsWith("github.io") && host.split(".")[0]) {
+          const owner = host.split(".")[0];
+          const repo = pathParts[0];
+          if (repo) {
+            return { owner, repo };
+          }
+        }
+
+        const hardcoded = { owner: "su-san1129", repo: "view-bomber" };
+        return hardcoded;
+      }
+
+      function classifyAsset(name) {
+        const lower = name.toLowerCase();
+
+        if (lower.endsWith(".dmg") || lower.endsWith(".pkg") || lower.endsWith(".app.tar.gz")) {
+          return { label: "macOS", hint: name };
+        }
+
+        if (lower.endsWith(".msi") || lower.endsWith(".exe")) {
+          return { label: "Windows", hint: name };
+        }
+
+        if (lower.endsWith(".appimage") || lower.endsWith(".deb") || lower.endsWith(".rpm")) {
+          return { label: "Linux", hint: name };
+        }
+
+        return null;
+      }
+
+      function pickPrimaryAssets(assets) {
+        const priorities = {
+          macOS: [".dmg", ".pkg", ".app.tar.gz"],
+          Windows: [".msi", ".exe"],
+          Linux: [".appimage", ".deb", ".rpm"]
+        };
+
+        const grouped = { macOS: [], Windows: [], Linux: [] };
+
+        for (const asset of assets) {
+          const classified = classifyAsset(asset.name);
+          if (!classified) continue;
+          grouped[classified.label].push(asset);
+        }
+
+        const picked = [];
+        for (const [platform, list] of Object.entries(grouped)) {
+          if (list.length === 0) continue;
+
+          const order = priorities[platform];
+          list.sort((a, b) => {
+            const aIndex = order.findIndex((ext) => a.name.toLowerCase().endsWith(ext));
+            const bIndex = order.findIndex((ext) => b.name.toLowerCase().endsWith(ext));
+            return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex);
+          });
+
+          picked.push({ platform, asset: list[0] });
+        }
+
+        return picked;
+      }
+
+      async function main() {
+        const { owner, repo } = detectRepo();
+        const latestApi = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+        const releasesUrl = `https://github.com/${owner}/${repo}/releases`;
+
+        allReleasesEl.href = releasesUrl;
+
+        try {
+          const response = await fetch(latestApi, {
+            headers: {
+              Accept: "application/vnd.github+json"
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`GitHub API returned ${response.status}`);
+          }
+
+          const release = await response.json();
+          latestReleaseEl.href = release.html_url || releasesUrl;
+
+          const assets = Array.isArray(release.assets) ? release.assets : [];
+          const picked = pickPrimaryAssets(assets);
+
+          statusEl.textContent = `Latest: ${release.name || release.tag_name || "(untitled)"}`;
+
+          if (picked.length === 0) {
+            statusEl.textContent += " (no installer assets detected yet)";
+            return;
+          }
+
+          buttonsEl.innerHTML = "";
+          for (const { platform, asset } of picked) {
+            const a = document.createElement("a");
+            a.className = "btn";
+            a.href = asset.browser_download_url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.innerHTML = `${platform}<span>${asset.name}</span>`;
+            buttonsEl.appendChild(a);
+          }
+
+          buttonsEl.classList.remove("hidden");
+        } catch (err) {
+          statusEl.textContent = "Could not load latest release. Use \"All releases\" instead.";
+          console.error(err);
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>

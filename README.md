@@ -117,6 +117,16 @@ The CI workflow (`.github/workflows/quality.yml`) enforces:
 6. `cargo clippy --all-targets --all-features -- -D warnings`
 7. `cargo check`
 
+## Distribution Page (GitHub Pages)
+
+- Static page source: `docs/index.html`
+- Deploy workflow: `.github/workflows/pages.yml`
+- Published URL: `https://su-san1129.github.io/view-bomber/`
+- When using the default `github.io` domain, HTTPS is required by GitHub Pages.
+
+The page reads the latest release from the GitHub API and renders platform download buttons from
+release assets.
+
 ## Pre-commit Automation
 
 Pre-commit is managed with Husky + lint-staged. On commit, staged files are checked/formatted with:

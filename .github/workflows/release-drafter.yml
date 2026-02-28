@@ -1,7 +1,9 @@
 name: Release Drafter
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Quality"]
+    types: [completed]
     branches:
       - main
   workflow_dispatch:
@@ -12,6 +14,7 @@ permissions:
 
 jobs:
   update_release_draft:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Draft next release notes
