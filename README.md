@@ -18,6 +18,7 @@ multiple file types from a folder tree with fast preview, search, and format-spe
 - HTML: `.html`, `.htm`
 - JSON: `.json` (tree view)
 - CSV/TSV: `.csv`, `.tsv` (table view, auto delimiter detection: comma/tab/semicolon)
+- DXF: `.dxf` (2D canvas preview for common entities: line/polyline/circle/arc)
 - Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`
 - PDF: `.pdf` (embedded `pdf.js` viewer with page navigation and zoom)
 

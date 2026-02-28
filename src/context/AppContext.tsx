@@ -49,6 +49,7 @@ const initialState: AppState = {
     { id: "html", label: "HTML", extensions: ["html", "htm"], searchable: true },
     { id: "json", label: "JSON", extensions: ["json"], searchable: true },
     { id: "csv", label: "CSV", extensions: ["csv", "tsv"], searchable: true },
+    { id: "dxf", label: "DXF", extensions: ["dxf"], searchable: true },
     {
       id: "image",
       label: "Image",

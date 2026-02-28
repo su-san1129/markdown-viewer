@@ -47,6 +47,12 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             searchable: true,
         },
         SupportedFileType {
+            id: "dxf".to_string(),
+            label: "DXF".to_string(),
+            extensions: vec!["dxf".to_string()],
+            searchable: true,
+        },
+        SupportedFileType {
             id: "image".to_string(),
             label: "Image".to_string(),
             extensions: vec![
