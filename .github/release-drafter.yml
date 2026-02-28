@@ -5,6 +5,10 @@ change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: "<*_&"
 
 categories:
+  - title: "Breaking Changes"
+    labels:
+      - "breaking"
+      - "major"
   - title: "Features"
     labels:
       - "feature"
@@ -31,16 +35,17 @@ categories:
       - "build"
       - "ci"
       - "deps"
-  - title: "Other Changes"
-    labels:
-      - "*"
 
 exclude-labels:
   - "skip-changelog"
+  - "duplicate"
+  - "invalid"
+  - "wontfix"
 
 version-resolver:
   major:
     labels:
+      - "breaking"
       - "major"
   minor:
     labels:
@@ -57,9 +62,23 @@ version-resolver:
       - "hotfix"
       - "perf"
       - "refactor"
+      - "docs"
+      - "chore"
+      - "build"
+      - "ci"
+      - "deps"
   default: patch
 
 template: |
-  ## Release Notes
+  ## What is in this release
 
   $CHANGES
+
+  ## Download
+
+  - Download page: https://su-san1129.github.io/view-bomber/
+  - Release assets: see this release's **Assets** section
+
+  ## Notes
+
+  - Version: $RESOLVED_VERSION

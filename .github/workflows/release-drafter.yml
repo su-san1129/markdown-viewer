@@ -2,7 +2,7 @@ name: Release Drafter
 
 on:
   workflow_run:
-    workflows: ["Quality"]
+    workflows: ["Build Installers"]
     types: [completed]
     branches:
       - main
