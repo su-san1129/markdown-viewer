@@ -3,11 +3,10 @@ import { useAppState } from "../context/AppContext";
 import { useOpenFolder } from "../lib/useOpenFolder";
 
 export function EmptyState() {
-  const { workspaceOrder, workspaces } = useAppState();
+  const { workspaces } = useAppState();
   const openFolder = useOpenFolder();
-  const recentFolders = workspaceOrder
-    .map((workspaceId) => workspaces[workspaceId])
-    .filter((workspace) => !!workspace)
+  const recentFolders = Object.values(workspaces)
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
     .map((workspace) => ({
       path: workspace.path,
       name: workspace.name

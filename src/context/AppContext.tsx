@@ -26,6 +26,8 @@ export interface WorkspaceSession {
   fileTree: FileEntry[];
   selectedFilePath: string | null;
   fileContent: string | null;
+  fileEncoding: string | null;
+  fileIsUtf8: boolean | null;
   loading: boolean;
   error: string | null;
   searchQuery: string;
@@ -44,12 +46,21 @@ interface AppState {
 
 type AppAction =
   | { type: "ACTIVATE_WORKSPACE"; payload: string; }
+  | { type: "CLOSE_WORKSPACE"; payload: string; }
   | { type: "SET_WORKSPACE_TREE"; payload: { workspaceId: string; tree: FileEntry[]; }; }
   | {
     type: "SET_WORKSPACE_SELECTED_FILE";
     payload: { workspaceId: string; filePath: string | null; };
   }
-  | { type: "SET_WORKSPACE_FILE_CONTENT"; payload: { workspaceId: string; content: string; }; }
+  | {
+    type: "SET_WORKSPACE_FILE_CONTENT";
+    payload: {
+      workspaceId: string;
+      content: string;
+      encoding: string | null;
+      isUtf8: boolean | null;
+    };
+  }
   | { type: "SET_WORKSPACE_LOADING"; payload: { workspaceId: string; loading: boolean; }; }
   | { type: "SET_WORKSPACE_ERROR"; payload: { workspaceId: string; error: string | null; }; }
   | { type: "SET_WORKSPACE_SEARCH_QUERY"; payload: { workspaceId: string; query: string; }; }
@@ -88,6 +99,8 @@ function createWorkspaceSession(
     fileTree: [],
     selectedFilePath: seed?.selectedFilePath ?? null,
     fileContent: null,
+    fileEncoding: null,
+    fileIsUtf8: null,
     loading: false,
     error: null,
     searchQuery: seed?.searchQuery ?? "",
@@ -98,8 +111,9 @@ function createWorkspaceSession(
   };
 }
 
-function touchWorkspaceOrder(order: string[], workspaceId: string): string[] {
-  return [workspaceId, ...order.filter((id) => id !== workspaceId)];
+function ensureWorkspaceOrder(order: string[], workspaceId: string): string[] {
+  if (order.includes(workspaceId)) return order;
+  return [...order, workspaceId];
 }
 
 function evictWorkspaceMemory(workspace: WorkspaceSession): WorkspaceSession {
@@ -108,6 +122,8 @@ function evictWorkspaceMemory(workspace: WorkspaceSession): WorkspaceSession {
     treeLoaded: false,
     fileTree: [],
     fileContent: null,
+    fileEncoding: null,
+    fileIsUtf8: null,
     searchResults: [],
     searchLoading: false,
     loading: false,
@@ -120,7 +136,12 @@ function applyMemoryLimit(state: AppState): AppState {
     return state;
   }
 
-  const keepIds = new Set(state.workspaceOrder.slice(0, MAX_WORKSPACES_IN_MEMORY));
+  const keepIds = new Set(
+    Object.values(state.workspaces)
+      .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+      .slice(0, MAX_WORKSPACES_IN_MEMORY)
+      .map((workspace) => workspace.id)
+  );
   const nextWorkspaces = { ...state.workspaces };
 
   for (const workspaceId of state.workspaceOrder) {
@@ -209,13 +230,35 @@ function appReducer(state: AppState, action: AppAction): AppState {
       const nextState = {
         ...state,
         activeWorkspaceId: workspaceId,
-        workspaceOrder: touchWorkspaceOrder(state.workspaceOrder, workspaceId),
+        workspaceOrder: ensureWorkspaceOrder(state.workspaceOrder, workspaceId),
         workspaces: {
           ...state.workspaces,
           [workspaceId]: nextWorkspace
         }
       };
       return applyMemoryLimit(nextState);
+    }
+    case "CLOSE_WORKSPACE": {
+      const workspaceId = action.payload;
+      if (!state.workspaces[workspaceId]) return state;
+
+      const closedIndex = state.workspaceOrder.indexOf(workspaceId);
+      const nextOrder = state.workspaceOrder.filter((id) => id !== workspaceId);
+      const nextWorkspaces = { ...state.workspaces };
+      delete nextWorkspaces[workspaceId];
+
+      let activeWorkspaceId = state.activeWorkspaceId;
+      if (state.activeWorkspaceId === workspaceId) {
+        const fallbackIndex = Math.min(closedIndex, nextOrder.length - 1);
+        activeWorkspaceId = fallbackIndex >= 0 ? nextOrder[fallbackIndex] : null;
+      }
+
+      return {
+        ...state,
+        activeWorkspaceId,
+        workspaceOrder: nextOrder,
+        workspaces: nextWorkspaces
+      };
     }
     case "SET_WORKSPACE_TREE":
       return updateWorkspace(action.payload.workspaceId, (workspace) => ({
@@ -231,12 +274,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
         selectedFilePath: action.payload.filePath,
         loading: action.payload.filePath !== null,
         error: null,
-        fileContent: null
+        fileContent: null,
+        fileEncoding: null,
+        fileIsUtf8: null
       }));
     case "SET_WORKSPACE_FILE_CONTENT":
       return updateWorkspace(action.payload.workspaceId, (workspace) => ({
         ...workspace,
         fileContent: action.payload.content,
+        fileEncoding: action.payload.encoding,
+        fileIsUtf8: action.payload.isUtf8,
         loading: false
       }));
     case "SET_WORKSPACE_LOADING":
