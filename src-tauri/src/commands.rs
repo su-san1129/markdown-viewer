@@ -601,7 +601,8 @@ fn quote_sql_identifier(identifier: &str) -> String {
 }
 
 fn read_duckdb_tables_internal(path: &Path) -> Result<Vec<DuckDbTableInfo>, String> {
-    let connection = Connection::open(path).map_err(|e| format!("Failed to open DuckDB file: {}", e))?;
+    let connection =
+        Connection::open(path).map_err(|e| format!("Failed to open DuckDB file: {}", e))?;
     let mut statement = connection
         .prepare(
             "
@@ -712,8 +713,10 @@ fn read_duckdb_table_preview_internal(
     table_name: &str,
     max_rows: usize,
 ) -> Result<DuckDbTablePreviewData, String> {
-    let connection = Connection::open(path).map_err(|e| format!("Failed to open DuckDB file: {}", e))?;
-    let resolved_table_reference = resolve_duckdb_table_reference(&connection, schema_name, table_name)?;
+    let connection =
+        Connection::open(path).map_err(|e| format!("Failed to open DuckDB file: {}", e))?;
+    let resolved_table_reference =
+        resolve_duckdb_table_reference(&connection, schema_name, table_name)?;
 
     let count_sql = format!("SELECT COUNT(*) FROM {}", resolved_table_reference);
     let total_rows_i64 = connection
@@ -944,7 +947,8 @@ fn resolve_launch_target_path(path_arg: &str) -> Result<Option<LaunchTarget>, St
     let absolute_path = if raw_path.is_absolute() {
         raw_path
     } else {
-        let cwd = std::env::current_dir().map_err(|e| format!("Failed to get current dir: {}", e))?;
+        let cwd =
+            std::env::current_dir().map_err(|e| format!("Failed to get current dir: {}", e))?;
         cwd.join(raw_path)
     };
 
