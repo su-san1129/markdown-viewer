@@ -2,10 +2,10 @@ use calamine::{open_workbook_auto, Reader};
 use chardetng::EncodingDetector;
 use csv::{ByteRecord, ReaderBuilder};
 use duckdb::Connection;
-use rusqlite::Connection as SqliteConnection;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
+use rusqlite::Connection as SqliteConnection;
 use serde::Serialize;
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
@@ -191,11 +191,7 @@ fn spreadsheet_extensions() -> Vec<String> {
 }
 
 fn document_extensions() -> Vec<String> {
-    vec![
-        "docx".to_string(),
-        "odt".to_string(),
-        "rtf".to_string(),
-    ]
+    vec!["docx".to_string(), "odt".to_string(), "rtf".to_string()]
 }
 
 fn parquet_extensions() -> Vec<String> {
@@ -679,8 +675,7 @@ fn parse_docx_text(path: &Path) -> Result<String, String> {
 }
 
 fn parse_odt_text(path: &Path) -> Result<String, String> {
-    let file =
-        fs::File::open(path).map_err(|e| format!("Failed to open odt file: {}", e))?;
+    let file = fs::File::open(path).map_err(|e| format!("Failed to open odt file: {}", e))?;
     let mut archive =
         ZipArchive::new(file).map_err(|e| format!("Failed to read odt archive: {}", e))?;
     let mut content_xml = archive
@@ -795,9 +790,7 @@ fn parse_rtf_text(path: &Path) -> Result<String, String> {
                     let word = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
                     // Read optional numeric parameter
                     let mut param: Option<i32> = None;
-                    if i < bytes.len()
-                        && (bytes[i] == b'-' || bytes[i].is_ascii_digit())
-                    {
+                    if i < bytes.len() && (bytes[i] == b'-' || bytes[i].is_ascii_digit()) {
                         let param_start = i;
                         if bytes[i] == b'-' {
                             i += 1;
@@ -819,8 +812,11 @@ fn parse_rtf_text(path: &Path) -> Result<String, String> {
                         "tab" => text.push('\t'),
                         "u" => {
                             if let Some(cp) = param {
-                                let cp =
-                                    if cp < 0 { (cp + 65536) as u32 } else { cp as u32 };
+                                let cp = if cp < 0 {
+                                    (cp + 65536) as u32
+                                } else {
+                                    cp as u32
+                                };
                                 if let Some(ch) = char::from_u32(cp) {
                                     text.push(ch);
                                 }
@@ -834,9 +830,8 @@ fn parse_rtf_text(path: &Path) -> Result<String, String> {
                                 i += 1;
                             }
                         }
-                        "fonttbl" | "colortbl" | "stylesheet" | "info" | "pict"
-                        | "header" | "footer" | "headerl" | "headerr" | "footerl"
-                        | "footerr" | "footnote" => {
+                        "fonttbl" | "colortbl" | "stylesheet" | "info" | "pict" | "header"
+                        | "footer" | "headerl" | "headerr" | "footerl" | "footerr" | "footnote" => {
                             skip_depth = Some(depth);
                         }
                         _ => {}
@@ -1102,11 +1097,9 @@ fn read_duckdb_table_preview_internal(
 }
 
 fn read_sqlite_tables_internal(path: &Path) -> Result<Vec<SqliteTableInfo>, String> {
-    let connection = SqliteConnection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
+    let connection =
+        SqliteConnection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
 
     let mut statement = connection
         .prepare(
@@ -1132,11 +1125,9 @@ fn read_sqlite_table_preview_internal(
     table_name: &str,
     max_rows: usize,
 ) -> Result<SqliteTablePreviewData, String> {
-    let connection = SqliteConnection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
+    let connection =
+        SqliteConnection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
 
     let quoted_table = quote_sql_identifier(table_name);
 
@@ -1588,9 +1579,7 @@ pub async fn read_docx_text(path: String) -> Result<DocxTextData, String> {
         return Err(format!("Not a file: {}", path));
     }
     if !is_extension_in(file_path, &document_extensions()) {
-        return Err(
-            "対象ファイルはドキュメント形式(.docx/.odt/.rtf)ではありません".to_string(),
-        );
+        return Err("対象ファイルはドキュメント形式(.docx/.odt/.rtf)ではありません".to_string());
     }
 
     let text = if has_extension(file_path, "odt") {
@@ -1678,9 +1667,7 @@ pub async fn read_sqlite_tables(path: String) -> Result<Vec<SqliteTableInfo>, St
         return Err(format!("Not a file: {}", path));
     }
     if !is_extension_in(file_path, &sqlite_extensions()) {
-        return Err(
-            "対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string(),
-        );
+        return Err("対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string());
     }
     read_sqlite_tables_internal(file_path)
 }
@@ -1699,9 +1686,7 @@ pub async fn read_sqlite_table_preview(
         return Err(format!("Not a file: {}", path));
     }
     if !is_extension_in(file_path, &sqlite_extensions()) {
-        return Err(
-            "対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string(),
-        );
+        return Err("対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string());
     }
     if table_name.trim().is_empty() {
         return Err("table_name must not be empty".to_string());

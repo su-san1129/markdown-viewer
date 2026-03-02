@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 tools/cache
 tools/.staging
+
+# Bundled binaries (pandoc, tectonic, etc.)
+resources/bin/macos/
+resources/bin/linux/
+resources/bin/windows/
