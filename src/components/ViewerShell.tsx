@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { watchImmediate } from "@tauri-apps/plugin-fs";
 import { FileText } from "lucide-react";
 import { useActiveWorkspace, useAppDispatch, useAppState } from "../context/AppContext";
-import { exportMarkdownToPdf, readFileContent, savePdfDialog } from "../lib/tauri";
+import { useFileWatcher } from "../lib/useFileWatcher";
 import { EmptyState } from "./EmptyState";
 import { FindBar } from "./FindBar";
-import { requiresRawTextContent } from "../viewers/fileTypes";
 import { resolveViewer } from "../viewers/registry";
 
-export function MarkdownViewer() {
+export function ViewerShell() {
   const { activeWorkspaceId } = useAppState();
   const activeWorkspace = useActiveWorkspace();
   const dispatch = useAppDispatch();
-  const unwatchRef = useRef<(() => void) | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [findVisible, setFindVisible] = useState(false);
-  const [exportingPdf, setExportingPdf] = useState(false);
 
   const selectedFilePath = activeWorkspace?.selectedFilePath ?? null;
   const fileContent = activeWorkspace?.fileContent ?? null;
@@ -26,84 +22,14 @@ export function MarkdownViewer() {
   const closeFindBar = useCallback(() => setFindVisible(false), []);
   const viewer = selectedFilePath ? resolveViewer(selectedFilePath) : null;
   const supportsFind = viewer?.supportsFind ?? true;
-  const isMarkdownViewer = viewer?.id === "markdown";
   const fileName = selectedFilePath?.split("/").pop() ?? "";
   const content = fileContent ?? "";
 
-  const onExportPdf = useCallback(async () => {
-    if (!activeWorkspaceId || !selectedFilePath || !isMarkdownViewer || exportingPdf) return;
-    const defaultPath = selectedFilePath.replace(/\.(md|markdown)$/i, ".pdf");
-    const selectedPath = await savePdfDialog(defaultPath);
-    if (!selectedPath) return;
+  const layout = viewer?.layout;
+  const overflowY = layout?.overflow ?? "auto";
+  const padding = (layout?.padding ?? true) ? "var(--sp-6) var(--sp-10)" : 0;
 
-    try {
-      setExportingPdf(true);
-      await exportMarkdownToPdf(selectedFilePath, selectedPath);
-      dispatch({
-        type: "SET_WORKSPACE_ERROR",
-        payload: { workspaceId: activeWorkspaceId, error: null }
-      });
-    } catch (error) {
-      dispatch({
-        type: "SET_WORKSPACE_ERROR",
-        payload: { workspaceId: activeWorkspaceId, error: String(error) }
-      });
-    } finally {
-      setExportingPdf(false);
-    }
-  }, [activeWorkspaceId, dispatch, exportingPdf, isMarkdownViewer, selectedFilePath]);
-
-  useEffect(() => {
-    if (!selectedFilePath) return;
-
-    let cancelled = false;
-
-    const setupWatch = async () => {
-      if (unwatchRef.current) {
-        unwatchRef.current();
-        unwatchRef.current = null;
-      }
-
-      try {
-        const unwatch = await watchImmediate(selectedFilePath, async (event) => {
-          if (cancelled) return;
-          const kind = event.type;
-          if (typeof kind === "object" && "modify" in kind) {
-            try {
-              const fileContent = requiresRawTextContent(selectedFilePath)
-                ? await readFileContent(selectedFilePath)
-                : { content: "", encoding: null, isUtf8: null };
-              if (!activeWorkspaceId) return;
-              dispatch({
-                type: "SET_WORKSPACE_FILE_CONTENT",
-                payload: {
-                  workspaceId: activeWorkspaceId,
-                  content: fileContent.content,
-                  encoding: fileContent.encoding,
-                  isUtf8: fileContent.isUtf8
-                }
-              });
-            } catch {
-              // File may have been deleted
-            }
-          }
-        });
-        unwatchRef.current = unwatch;
-      } catch {
-        // Watching may not be supported
-      }
-    };
-
-    setupWatch();
-
-    return () => {
-      cancelled = true;
-      if (unwatchRef.current) {
-        unwatchRef.current();
-        unwatchRef.current = null;
-      }
-    };
-  }, [selectedFilePath, dispatch, activeWorkspaceId]);
+  useFileWatcher(selectedFilePath, activeWorkspaceId, dispatch);
 
   // Cmd+F -> open find bar when viewer supports in-file find
   useEffect(() => {
@@ -223,40 +149,19 @@ export function MarkdownViewer() {
             {fileIsUtf8 === false ? " (detected)" : ""}
           </span>
         )}
-        {isMarkdownViewer && (
-          <button
-            type="button"
-            onClick={() => void onExportPdf()}
-            disabled={exportingPdf}
-            style={{
-              marginLeft: "auto",
-              display: "inline-flex",
-              alignItems: "center",
-              height: 24,
-              padding: "0 10px",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--border-color)",
-              backgroundColor: exportingPdf ? "transparent" : "var(--bg-hover)",
-              color: exportingPdf ? "var(--text-muted)" : "var(--text-primary)",
-              cursor: exportingPdf ? "default" : "pointer",
-              fontSize: "var(--font-ui)"
-            }}
-            title="MarkdownをPDFとして書き出し"
-          >
-            {exportingPdf ? "書き出し中..." : "PDFとして書き出し"}
-          </button>
-        )}
+        {viewer?.renderToolbarActions?.({
+          filePath: selectedFilePath,
+          content,
+          workspaceId: activeWorkspaceId,
+          dispatch
+        })}
       </div>
       {findVisible && supportsFind && <FindBar contentRef={contentRef} onClose={closeFindBar} />}
       <div
         style={{
           flex: 1,
-          overflowY: viewer?.id === "html" || viewer?.id === "pdf" || viewer?.id === "dxf"
-            ? "hidden"
-            : "auto",
-          padding: viewer?.id === "html" || viewer?.id === "pdf" || viewer?.id === "dxf"
-            ? 0
-            : "var(--sp-6) var(--sp-10)"
+          overflowY,
+          padding
         }}
       >
         {viewer

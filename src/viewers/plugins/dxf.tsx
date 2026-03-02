@@ -2763,6 +2763,7 @@ export const dxfViewerPlugin: ViewerPlugin = {
   label: "DXF",
   extensions: ["dxf"],
   supportsFind: false,
+  layout: { overflow: "hidden", padding: false },
   render({ content }) {
     return <DxfCanvasViewer content={content} />;
   }

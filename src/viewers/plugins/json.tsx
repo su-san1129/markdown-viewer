@@ -247,6 +247,7 @@ export const jsonViewerPlugin: ViewerPlugin = {
   label: "JSON",
   extensions: ["json", "geojson"],
   supportsFind: true,
+  layout: { padding: false },
   render({ filePath, content, contentRef }) {
     return <JsonViewer filePath={filePath} initialContent={content} contentRef={contentRef} />;
   }

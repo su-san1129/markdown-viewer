@@ -2771,43 +2771,43 @@ pub async fn prepare_geojson_tiles(
     );
     let mut last_percent = 29u8;
     let (indexed_features, bounds) = match extract_indexed_features(root, |processed, total| {
-            if total == 0 {
-                return;
-            }
-            let ratio = processed as f64 / total as f64;
-            let percent = (30.0 + ratio * 65.0).round().clamp(30.0, 95.0) as u8;
-            if percent <= last_percent {
-                return;
-            }
-            last_percent = percent;
-            let message = format!(
-                "Preparing GeoJSON tiles... {}% (indexing {} / {})",
-                percent, processed, total
-            );
+        if total == 0 {
+            return;
+        }
+        let ratio = processed as f64 / total as f64;
+        let percent = (30.0 + ratio * 65.0).round().clamp(30.0, 95.0) as u8;
+        if percent <= last_percent {
+            return;
+        }
+        last_percent = percent;
+        let message = format!(
+            "Preparing GeoJSON tiles... {}% (indexing {} / {})",
+            percent, processed, total
+        );
+        emit_geojson_prepare_progress(
+            &app,
+            progress_request_id,
+            "indexing",
+            percent,
+            message,
+            Some(total),
+            Some(processed),
+        );
+    }) {
+        Ok(result) => result,
+        Err(message) => {
             emit_geojson_prepare_progress(
                 &app,
                 progress_request_id,
-                "indexing",
-                percent,
-                message,
-                Some(total),
-                Some(processed),
+                "error",
+                100,
+                message.clone(),
+                None,
+                None,
             );
-        }) {
-            Ok(result) => result,
-            Err(message) => {
-                emit_geojson_prepare_progress(
-                    &app,
-                    progress_request_id,
-                    "error",
-                    100,
-                    message.clone(),
-                    None,
-                    None,
-                );
-                return Err(message);
-            }
-        };
+            return Err(message);
+        }
+    };
 
     let min_zoom = min_zoom.unwrap_or(0).min(20);
     let mut max_zoom = max_zoom.unwrap_or(12).min(20);

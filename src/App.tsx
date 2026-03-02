@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Allotment } from "allotment";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
-import { MarkdownViewer } from "./components/MarkdownViewer";
+import { ViewerShell } from "./components/ViewerShell";
 import { useAppDispatch } from "./context/AppContext";
 import { getLaunchTarget, readFileContent } from "./lib/tauri";
 import { useOpenFolder } from "./lib/useOpenFolder";
@@ -67,7 +67,7 @@ function App() {
             <Sidebar />
           </Allotment.Pane>
           <Allotment.Pane>
-            <MarkdownViewer />
+            <ViewerShell />
           </Allotment.Pane>
         </Allotment>
       </div>

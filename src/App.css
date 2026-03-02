@@ -846,9 +846,23 @@ mark.find-highlight-current {
 
 /* ===== GeoJSON map viewer ===== */
 .geojson-view {
-  border: 1px solid var(--md-table-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
+  background-color: transparent;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.geojson-view.is-fullscreen {
+  position: fixed;
+  inset: 10px;
+  z-index: 100;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   background-color: var(--bg-main);
 }
 
@@ -880,6 +894,17 @@ mark.find-highlight-current {
   flex-shrink: 0;
 }
 
+.geojson-properties-toggle {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: var(--font-ui);
+  cursor: pointer;
+}
+
 .geojson-resolution-label {
   color: var(--text-secondary);
 }
@@ -900,8 +925,71 @@ mark.find-highlight-current {
   font-size: var(--font-label);
 }
 
+.geojson-content {
+  display: block;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.geojson-map-wrap {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.geojson-properties-panel {
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  min-height: 360px;
+  max-height: min(70vh, 700px);
+  overflow: auto;
+}
+
+.geojson-properties-panel.is-drawer {
+  border-left: 0;
+  border-top: 1px solid var(--border-color);
+  min-height: 0;
+  max-height: 40vh;
+}
+
+.geojson-properties-panel.is-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1200;
+  width: min(360px, calc(100% - 16px));
+  min-height: 0;
+  max-height: calc(100% - 16px);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-main) 94%, transparent);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+}
+
+.geojson-properties-inner {
+  padding: 10px;
+}
+
+.geojson-properties-title {
+  font-size: var(--font-ui);
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.geojson-properties-pre {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+
 .geojson-map {
-  height: min(70vh, 700px);
+  height: 100%;
   min-height: 360px;
   width: 100%;
 }
@@ -910,4 +998,32 @@ mark.find-highlight-current {
   width: 100%;
   height: 100%;
   background: var(--bg-main);
+}
+
+.geojson-view.is-fullscreen .geojson-content {
+  height: 100%;
+}
+
+.geojson-view.is-fullscreen .geojson-map {
+  height: 100%;
+  min-height: 0;
+}
+
+.geojson-view.is-fullscreen .geojson-properties-panel.is-drawer {
+  max-height: none;
+  min-height: 0;
+}
+
+.geojson-view.is-fullscreen .geojson-properties-panel.is-overlay {
+  max-height: calc(100% - 16px);
+}
+
+@media (max-width: 1100px) {
+  .geojson-content {
+    display: block;
+  }
+
+  .geojson-map {
+    height: 100%;
+  }
 }

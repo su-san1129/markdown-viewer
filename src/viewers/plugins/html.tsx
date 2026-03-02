@@ -107,6 +107,7 @@ export const htmlViewerPlugin: ViewerPlugin = {
   label: "HTML",
   extensions: ["html", "htm"],
   supportsFind: false,
+  layout: { overflow: "hidden", padding: false },
   render({ filePath, content }) {
     return <HtmlPreview filePath={filePath} content={content} />;
   }

@@ -350,6 +350,7 @@ export const pdfViewerPlugin: ViewerPlugin = {
   label: "PDF",
   extensions: ["pdf"],
   supportsFind: false,
+  layout: { overflow: "hidden", padding: false },
   render({ filePath }) {
     return <PdfViewer filePath={filePath} />;
   }

@@ -44,7 +44,7 @@ interface AppState {
   supportedFileTypes: SupportedFileType[];
 }
 
-type AppAction =
+export type AppAction =
   | { type: "ACTIVATE_WORKSPACE"; payload: string; }
   | { type: "CLOSE_WORKSPACE"; payload: string; }
   | { type: "SET_WORKSPACE_TREE"; payload: { workspaceId: string; tree: FileEntry[]; }; }
