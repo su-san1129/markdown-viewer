@@ -114,6 +114,11 @@ pub struct SqliteTablePreviewData {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct GeoJsonData {
+    pub geojson: String,
+}
+
 fn text_extensions() -> Vec<String> {
     vec![
         "txt".to_string(),
@@ -210,6 +215,14 @@ fn sqlite_extensions() -> Vec<String> {
     ]
 }
 
+fn gpx_extensions() -> Vec<String> {
+    vec!["gpx".to_string()]
+}
+
+fn kml_extensions() -> Vec<String> {
+    vec!["kml".to_string(), "kmz".to_string()]
+}
+
 fn supported_file_types() -> Vec<SupportedFileType> {
     vec![
         SupportedFileType {
@@ -276,6 +289,18 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             id: "sqlite".to_string(),
             label: "SQLite".to_string(),
             extensions: sqlite_extensions(),
+            searchable: false,
+        },
+        SupportedFileType {
+            id: "gpx".to_string(),
+            label: "GPX".to_string(),
+            extensions: gpx_extensions(),
+            searchable: false,
+        },
+        SupportedFileType {
+            id: "kml".to_string(),
+            label: "KML".to_string(),
+            extensions: kml_extensions(),
             searchable: false,
         },
         SupportedFileType {
@@ -851,6 +876,503 @@ fn parse_rtf_text(path: &Path) -> Result<String, String> {
     }
 
     Ok(text)
+}
+
+fn parse_gpx_to_geojson(path: &Path) -> Result<String, String> {
+    let xml = fs::read_to_string(path).map_err(|e| format!("Failed to read GPX file: {}", e))?;
+    let mut reader = XmlReader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+
+    let mut features: Vec<serde_json::Value> = Vec::new();
+    let mut buf = Vec::new();
+
+    #[derive(Default)]
+    struct WptState {
+        lat: Option<f64>,
+        lon: Option<f64>,
+        name: Option<String>,
+        desc: Option<String>,
+        ele: Option<f64>,
+    }
+
+    #[derive(Default)]
+    struct TrkState {
+        name: Option<String>,
+        desc: Option<String>,
+        segments: Vec<Vec<[f64; 2]>>,
+        current_segment: Vec<[f64; 2]>,
+        in_trkseg: bool,
+    }
+
+    #[derive(Default)]
+    struct RteState {
+        name: Option<String>,
+        desc: Option<String>,
+        points: Vec<[f64; 2]>,
+    }
+
+    enum ParseContext {
+        None,
+        Wpt(WptState),
+        Trk(TrkState),
+        Rte(RteState),
+    }
+
+    let mut context = ParseContext::None;
+    let mut current_text = String::new();
+    let mut in_trkpt = false;
+
+    fn parse_lat_lon(e: &quick_xml::events::BytesStart<'_>) -> (Option<f64>, Option<f64>) {
+        let mut lat: Option<f64> = None;
+        let mut lon: Option<f64> = None;
+        for attr in e.attributes().filter_map(|a| a.ok()) {
+            let local = attr.key.local_name();
+            let key = std::str::from_utf8(local.as_ref()).unwrap_or("");
+            let val = String::from_utf8_lossy(&attr.value);
+            match key {
+                "lat" => lat = val.parse().ok(),
+                "lon" => lon = val.parse().ok(),
+                _ => {}
+            }
+        }
+        (lat, lon)
+    }
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let local = e.local_name();
+                let tag = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match tag {
+                    "wpt" => {
+                        let (lat, lon) = parse_lat_lon(e);
+                        let wpt = WptState {
+                            lat,
+                            lon,
+                            ..Default::default()
+                        };
+                        context = ParseContext::Wpt(wpt);
+                    }
+                    "trk" => {
+                        context = ParseContext::Trk(TrkState::default());
+                    }
+                    "rte" => {
+                        context = ParseContext::Rte(RteState::default());
+                    }
+                    "trkseg" => {
+                        if let ParseContext::Trk(ref mut trk) = context {
+                            trk.in_trkseg = true;
+                            trk.current_segment = Vec::new();
+                        }
+                    }
+                    "trkpt" => {
+                        if let ParseContext::Trk(ref mut trk) = context {
+                            if trk.in_trkseg {
+                                let (lat, lon) = parse_lat_lon(e);
+                                if let (Some(lon_v), Some(lat_v)) = (lon, lat) {
+                                    trk.current_segment.push([lon_v, lat_v]);
+                                }
+                                in_trkpt = true;
+                            }
+                        }
+                    }
+                    "rtept" => {
+                        if let ParseContext::Rte(ref mut rte) = context {
+                            let (lat, lon) = parse_lat_lon(e);
+                            if let (Some(lon_v), Some(lat_v)) = (lon, lat) {
+                                rte.points.push([lon_v, lat_v]);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                current_text.clear();
+            }
+            Ok(Event::Text(ref e)) => {
+                if let Ok(decoded) = e.decode() {
+                    current_text = decoded.to_string();
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = e.local_name();
+                let tag = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match tag {
+                    "name" => match context {
+                        ParseContext::Wpt(ref mut w) => w.name = Some(current_text.clone()),
+                        ParseContext::Trk(ref mut t) => {
+                            if !in_trkpt {
+                                t.name = Some(current_text.clone());
+                            }
+                        }
+                        ParseContext::Rte(ref mut r) => r.name = Some(current_text.clone()),
+                        _ => {}
+                    },
+                    "desc" => match context {
+                        ParseContext::Wpt(ref mut w) => w.desc = Some(current_text.clone()),
+                        ParseContext::Trk(ref mut t) => {
+                            if !in_trkpt {
+                                t.desc = Some(current_text.clone());
+                            }
+                        }
+                        ParseContext::Rte(ref mut r) => r.desc = Some(current_text.clone()),
+                        _ => {}
+                    },
+                    "ele" => {
+                        if let ParseContext::Wpt(ref mut w) = context {
+                            w.ele = current_text.parse().ok();
+                        }
+                    }
+                    "trkpt" => {
+                        in_trkpt = false;
+                    }
+                    "trkseg" => {
+                        if let ParseContext::Trk(ref mut trk) = context {
+                            if !trk.current_segment.is_empty() {
+                                let seg = std::mem::take(&mut trk.current_segment);
+                                trk.segments.push(seg);
+                            }
+                            trk.in_trkseg = false;
+                        }
+                    }
+                    "wpt" => {
+                        if let ParseContext::Wpt(ref wpt) = context {
+                            if let (Some(lon), Some(lat)) = (wpt.lon, wpt.lat) {
+                                let mut props = serde_json::Map::new();
+                                if let Some(ref n) = wpt.name {
+                                    props.insert(
+                                        "name".to_string(),
+                                        serde_json::Value::String(n.clone()),
+                                    );
+                                }
+                                if let Some(ref d) = wpt.desc {
+                                    props.insert(
+                                        "description".to_string(),
+                                        serde_json::Value::String(d.clone()),
+                                    );
+                                }
+                                if let Some(el) = wpt.ele {
+                                    props.insert("elevation".to_string(), serde_json::json!(el));
+                                }
+                                features.push(serde_json::json!({
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "Point",
+                                        "coordinates": [lon, lat]
+                                    },
+                                    "properties": props
+                                }));
+                            }
+                        }
+                        context = ParseContext::None;
+                    }
+                    "trk" => {
+                        if let ParseContext::Trk(ref trk) = context {
+                            for seg in &trk.segments {
+                                if seg.len() >= 2 {
+                                    let mut props = serde_json::Map::new();
+                                    props.insert(
+                                        "featureType".to_string(),
+                                        serde_json::Value::String("track".to_string()),
+                                    );
+                                    if let Some(ref n) = trk.name {
+                                        props.insert(
+                                            "name".to_string(),
+                                            serde_json::Value::String(n.clone()),
+                                        );
+                                    }
+                                    if let Some(ref d) = trk.desc {
+                                        props.insert(
+                                            "description".to_string(),
+                                            serde_json::Value::String(d.clone()),
+                                        );
+                                    }
+                                    features.push(serde_json::json!({
+                                        "type": "Feature",
+                                        "geometry": {
+                                            "type": "LineString",
+                                            "coordinates": seg
+                                        },
+                                        "properties": props
+                                    }));
+                                }
+                            }
+                        }
+                        context = ParseContext::None;
+                    }
+                    "rte" => {
+                        if let ParseContext::Rte(ref rte) = context {
+                            if rte.points.len() >= 2 {
+                                let mut props = serde_json::Map::new();
+                                props.insert(
+                                    "featureType".to_string(),
+                                    serde_json::Value::String("route".to_string()),
+                                );
+                                if let Some(ref n) = rte.name {
+                                    props.insert(
+                                        "name".to_string(),
+                                        serde_json::Value::String(n.clone()),
+                                    );
+                                }
+                                if let Some(ref d) = rte.desc {
+                                    props.insert(
+                                        "description".to_string(),
+                                        serde_json::Value::String(d.clone()),
+                                    );
+                                }
+                                features.push(serde_json::json!({
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "LineString",
+                                        "coordinates": rte.points
+                                    },
+                                    "properties": props
+                                }));
+                            }
+                        }
+                        context = ParseContext::None;
+                    }
+                    _ => {}
+                }
+                current_text.clear();
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("Failed to parse GPX XML: {}", e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let collection = serde_json::json!({
+        "type": "FeatureCollection",
+        "features": features
+    });
+
+    serde_json::to_string(&collection).map_err(|e| format!("Failed to serialize GeoJSON: {}", e))
+}
+
+fn parse_kml_coordinates(text: &str) -> Vec<[f64; 3]> {
+    text.split_whitespace()
+        .filter_map(|token| {
+            let parts: Vec<&str> = token.split(',').collect();
+            if parts.len() >= 2 {
+                let lon: f64 = parts[0].parse().ok()?;
+                let lat: f64 = parts[1].parse().ok()?;
+                let alt: f64 = parts.get(2).and_then(|a| a.parse().ok()).unwrap_or(0.0);
+                Some([lon, lat, alt])
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_kml_to_geojson(xml_str: &str) -> Result<String, String> {
+    let mut reader = XmlReader::from_str(xml_str);
+    reader.config_mut().trim_text(true);
+
+    let mut features: Vec<serde_json::Value> = Vec::new();
+    let mut buf = Vec::new();
+
+    #[derive(Default)]
+    struct PlacemarkState {
+        name: Option<String>,
+        description: Option<String>,
+        geometries: Vec<serde_json::Value>,
+        coord_text: String,
+        in_outer: bool,
+        in_inner: bool,
+        outer_ring: Vec<[f64; 2]>,
+        inner_rings: Vec<Vec<[f64; 2]>>,
+    }
+
+    enum GeoType {
+        Point,
+        LineString,
+        Polygon,
+    }
+
+    let mut in_placemark = false;
+    let mut placemark = PlacemarkState::default();
+    let mut current_text = String::new();
+    let mut geo_stack: Vec<GeoType> = Vec::new();
+    let mut in_multi_geometry = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = e.local_name();
+                let tag = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match tag {
+                    "Placemark" => {
+                        in_placemark = true;
+                        placemark = PlacemarkState::default();
+                    }
+                    "Point" if in_placemark => {
+                        geo_stack.push(GeoType::Point);
+                    }
+                    "LineString" if in_placemark => {
+                        geo_stack.push(GeoType::LineString);
+                    }
+                    "Polygon" if in_placemark => {
+                        geo_stack.push(GeoType::Polygon);
+                        placemark.outer_ring.clear();
+                        placemark.inner_rings.clear();
+                    }
+                    "MultiGeometry" if in_placemark => {
+                        in_multi_geometry = true;
+                    }
+                    "outerBoundaryIs" if in_placemark => {
+                        placemark.in_outer = true;
+                    }
+                    "innerBoundaryIs" if in_placemark => {
+                        placemark.in_inner = true;
+                    }
+                    _ => {}
+                }
+                current_text.clear();
+            }
+            Ok(Event::Text(ref e)) => {
+                if let Ok(decoded) = e.decode() {
+                    current_text = decoded.to_string();
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = e.local_name();
+                let tag = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match tag {
+                    "name" if in_placemark && geo_stack.is_empty() => {
+                        placemark.name = Some(current_text.clone());
+                    }
+                    "description" if in_placemark && geo_stack.is_empty() => {
+                        placemark.description = Some(current_text.clone());
+                    }
+                    "coordinates" if in_placemark => {
+                        placemark.coord_text = current_text.clone();
+
+                        if placemark.in_outer || placemark.in_inner {
+                            let coords = parse_kml_coordinates(&placemark.coord_text);
+                            let ring: Vec<[f64; 2]> = coords.iter().map(|c| [c[0], c[1]]).collect();
+                            if placemark.in_outer {
+                                placemark.outer_ring = ring;
+                            } else if placemark.in_inner {
+                                placemark.inner_rings.push(ring);
+                            }
+                        }
+                    }
+                    "outerBoundaryIs" => {
+                        placemark.in_outer = false;
+                    }
+                    "innerBoundaryIs" => {
+                        placemark.in_inner = false;
+                    }
+                    "Point" if in_placemark => {
+                        geo_stack.pop();
+                        let coords = parse_kml_coordinates(&placemark.coord_text);
+                        if let Some(c) = coords.first() {
+                            placemark.geometries.push(serde_json::json!({
+                                "type": "Point",
+                                "coordinates": [c[0], c[1]]
+                            }));
+                        }
+                    }
+                    "LineString" if in_placemark && !placemark.in_outer && !placemark.in_inner => {
+                        geo_stack.pop();
+                        let coords = parse_kml_coordinates(&placemark.coord_text);
+                        let line: Vec<[f64; 2]> = coords.iter().map(|c| [c[0], c[1]]).collect();
+                        if line.len() >= 2 {
+                            placemark.geometries.push(serde_json::json!({
+                                "type": "LineString",
+                                "coordinates": line
+                            }));
+                        }
+                    }
+                    "Polygon" if in_placemark => {
+                        geo_stack.pop();
+                        if !placemark.outer_ring.is_empty() {
+                            let mut rings = vec![placemark.outer_ring.clone()];
+                            for inner in &placemark.inner_rings {
+                                rings.push(inner.clone());
+                            }
+                            placemark.geometries.push(serde_json::json!({
+                                "type": "Polygon",
+                                "coordinates": rings
+                            }));
+                        }
+                        placemark.outer_ring.clear();
+                        placemark.inner_rings.clear();
+                    }
+                    "MultiGeometry" if in_placemark => {
+                        in_multi_geometry = false;
+                    }
+                    "Placemark" => {
+                        let mut props = serde_json::Map::new();
+                        if let Some(ref n) = placemark.name {
+                            props.insert("name".to_string(), serde_json::Value::String(n.clone()));
+                        }
+                        if let Some(ref d) = placemark.description {
+                            props.insert(
+                                "description".to_string(),
+                                serde_json::Value::String(d.clone()),
+                            );
+                        }
+
+                        if placemark.geometries.len() == 1 && !in_multi_geometry {
+                            features.push(serde_json::json!({
+                                "type": "Feature",
+                                "geometry": placemark.geometries[0],
+                                "properties": props
+                            }));
+                        } else if !placemark.geometries.is_empty() {
+                            features.push(serde_json::json!({
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "GeometryCollection",
+                                    "geometries": placemark.geometries
+                                },
+                                "properties": props
+                            }));
+                        }
+                        in_placemark = false;
+                    }
+                    _ => {}
+                }
+                current_text.clear();
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("Failed to parse KML XML: {}", e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let collection = serde_json::json!({
+        "type": "FeatureCollection",
+        "features": features
+    });
+
+    serde_json::to_string(&collection).map_err(|e| format!("Failed to serialize GeoJSON: {}", e))
+}
+
+fn extract_kml_from_kmz(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|e| format!("Failed to open KMZ file: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read KMZ archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read KMZ entry: {}", e))?;
+        let name = entry.name().to_lowercase();
+        if name.ends_with(".kml") {
+            let mut xml = String::new();
+            entry
+                .read_to_string(&mut xml)
+                .map_err(|e| format!("Failed to read KML from KMZ: {}", e))?;
+            return Ok(xml);
+        }
+    }
+
+    Err("No .kml file found in KMZ archive".to_string())
 }
 
 fn parse_parquet_preview(path: &Path, max_rows: usize) -> Result<ParquetPreviewData, String> {
@@ -1696,6 +2218,46 @@ pub async fn read_sqlite_table_preview(
 }
 
 #[tauri::command]
+pub async fn read_gpx(path: String) -> Result<GeoJsonData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !is_extension_in(file_path, &gpx_extensions()) {
+        return Err("Target file is not .gpx".to_string());
+    }
+
+    let geojson = parse_gpx_to_geojson(file_path)?;
+    Ok(GeoJsonData { geojson })
+}
+
+#[tauri::command]
+pub async fn read_kml(path: String) -> Result<GeoJsonData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !is_extension_in(file_path, &kml_extensions()) {
+        return Err("Target file is not .kml or .kmz".to_string());
+    }
+
+    let xml_str = if has_extension(file_path, "kmz") {
+        extract_kml_from_kmz(file_path)?
+    } else {
+        fs::read_to_string(file_path).map_err(|e| format!("Failed to read KML file: {}", e))?
+    };
+
+    let geojson = parse_kml_to_geojson(&xml_str)?;
+    Ok(GeoJsonData { geojson })
+}
+
+#[tauri::command]
 pub async fn read_csv_chunk(
     path: String,
     cursor: Option<u64>,
@@ -1951,5 +2513,141 @@ mod tests {
         assert!(is_hidden_path_except_text_special(Path::new(
             "/tmp/.secret/notes.txt"
         )));
+    }
+
+    #[test]
+    fn gpx_extensions_in_supported_types() {
+        let types = supported_file_types();
+        let gpx_type = types.iter().find(|t| t.id == "gpx").unwrap();
+        assert!(gpx_type.extensions.contains(&"gpx".to_string()));
+        assert!(!gpx_type.searchable);
+    }
+
+    #[test]
+    fn kml_extensions_in_supported_types() {
+        let types = supported_file_types();
+        let kml_type = types.iter().find(|t| t.id == "kml").unwrap();
+        assert!(kml_type.extensions.contains(&"kml".to_string()));
+        assert!(kml_type.extensions.contains(&"kmz".to_string()));
+        assert!(!kml_type.searchable);
+    }
+
+    #[test]
+    fn parse_gpx_waypoint() {
+        let gpx = r#"<?xml version="1.0"?>
+<gpx version="1.1">
+  <wpt lat="35.6812" lon="139.7671">
+    <name>Tokyo</name>
+    <ele>40</ele>
+  </wpt>
+</gpx>"#;
+        let tmp = std::env::temp_dir().join("test_wpt.gpx");
+        fs::write(&tmp, gpx).unwrap();
+        let result = parse_gpx_to_geojson(&tmp).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["type"], "FeatureCollection");
+        let features = parsed["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["geometry"]["type"], "Point");
+        assert_eq!(features[0]["properties"]["name"], "Tokyo");
+        assert_eq!(features[0]["properties"]["elevation"], 40.0);
+        fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn parse_gpx_track() {
+        let gpx = r#"<?xml version="1.0"?>
+<gpx version="1.1">
+  <trk>
+    <name>Morning Run</name>
+    <trkseg>
+      <trkpt lat="35.68" lon="139.76"/>
+      <trkpt lat="35.69" lon="139.77"/>
+      <trkpt lat="35.70" lon="139.78"/>
+    </trkseg>
+  </trk>
+</gpx>"#;
+        let tmp = std::env::temp_dir().join("test_trk.gpx");
+        fs::write(&tmp, gpx).unwrap();
+        let result = parse_gpx_to_geojson(&tmp).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let features = parsed["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["geometry"]["type"], "LineString");
+        let coords = features[0]["geometry"]["coordinates"].as_array().unwrap();
+        assert_eq!(coords.len(), 3);
+        assert_eq!(features[0]["properties"]["name"], "Morning Run");
+        fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn parse_kml_point() {
+        let kml = r#"<?xml version="1.0"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Test Point</name>
+      <Point>
+        <coordinates>139.7671,35.6812,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>"#;
+        let result = parse_kml_to_geojson(kml).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["type"], "FeatureCollection");
+        let features = parsed["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["geometry"]["type"], "Point");
+        assert_eq!(features[0]["properties"]["name"], "Test Point");
+    }
+
+    #[test]
+    fn parse_kml_polygon() {
+        let kml = r#"<?xml version="1.0"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Area</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              0,0,0 1,0,0 1,1,0 0,1,0 0,0,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>"#;
+        let result = parse_kml_to_geojson(kml).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let features = parsed["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["geometry"]["type"], "Polygon");
+        let rings = features[0]["geometry"]["coordinates"].as_array().unwrap();
+        assert_eq!(rings.len(), 1);
+        assert_eq!(rings[0].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn parse_kml_linestring() {
+        let kml = r#"<?xml version="1.0"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Path</name>
+      <LineString>
+        <coordinates>0,0,0 1,1,0 2,2,0</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>"#;
+        let result = parse_kml_to_geojson(kml).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let features = parsed["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["geometry"]["type"], "LineString");
     }
 }

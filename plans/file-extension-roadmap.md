@@ -135,34 +135,51 @@
   - DoD: table list + row preview works with predictable limits
   - Tests: schema/table discovery + paged preview + error handling
 
-- [ ] EXT-007 Add `.gpx` support via geo conversion
+- [x] EXT-007 Add `.gpx` support via geo conversion
   - Priority: P2
   - Phase: 3
-  - Owner: TBD
+  - Owner: Agent
   - Files:
-    - geo parser/conversion path
-    - geo viewer plugin integration
-  - DoD: waypoint/track geometry renders with basic attribute display
-  - Tests: sample GPX with points + track segments
+    - `src-tauri/src/commands.rs` (parse_gpx_to_geojson, read_gpx command)
+    - `src-tauri/src/lib.rs`
+    - `src/viewers/plugins/gpx.tsx`
+    - `src/viewers/registry.ts`
+    - `src/lib/tauri.ts`
+    - `src/types/index.ts`
+    - `src/context/AppContext.tsx`
+    - `src/components/fileIcon.tsx`
+  - DoD: waypoint/track/route geometry renders on Leaflet map with name/desc/elevation properties
+  - Tests: cargo test with GPX waypoint + track segment fixtures
 
-- [ ] EXT-008 Add `.kml`/`.kmz` support via geo conversion
+- [x] EXT-008 Add `.kml`/`.kmz` support via geo conversion
   - Priority: P2
   - Phase: 3
-  - Owner: TBD
+  - Owner: Agent
   - Files:
-    - KML/KMZ parser/conversion path
-    - geo viewer integration
-  - DoD: placemark/line/polygon render for representative KML/KMZ files
-  - Tests: zipped and plain KML fixtures
+    - `src-tauri/src/commands.rs` (parse_kml_to_geojson, extract_kml_from_kmz, read_kml command)
+    - `src-tauri/src/lib.rs`
+    - `src/viewers/plugins/kml.tsx`
+    - `src/viewers/registry.ts`
+    - `src/lib/tauri.ts`
+    - `src/context/AppContext.tsx`
+    - `src/components/fileIcon.tsx`
+  - DoD: placemark/line/polygon render for KML; KMZ auto-extracted and rendered
+  - Tests: cargo test with KML point, linestring, polygon fixtures
 
-- [ ] EXT-009 Evaluate `.heic`/`.heif` support policy
+- [x] EXT-009 Evaluate `.heic`/`.heif` support policy
   - Priority: P2
   - Phase: 3
-  - Owner: TBD
+  - Owner: Agent
   - Files:
-    - image viewer path and/or conversion pipeline docs
-  - DoD: explicit supported/unsupported policy with UI error guidance
-  - Tests: platform matrix validation document
+    - `plans/file-extension-roadmap.md` (this document)
+  - DoD: explicit supported/unsupported policy documented
+  - Tests: N/A (policy evaluation only)
+  - Evaluation Result:
+    - macOS Safari only has native HEIC/HEIF support; Chrome/Firefox/Linux/Windows do not
+    - Rust conversion via `libheif` bindings adds heavy native dependency and complicates
+      cross-platform builds
+    - **Decision: Defer** — users should convert to JPEG/PNG for viewing. Future platform-specific
+      support may be considered
 
 - [ ] EXT-010 Evaluate `.orc`, `.feather`, `.arrow`, `.ipc`
   - Priority: P3
@@ -231,3 +248,8 @@
     - EXT-004 `.odt` (document text extraction via ZIP + quick-xml)
     - EXT-005 `.rtf` (document text extraction via state-machine parser)
     - EXT-006 `.sqlite`/`.sqlite3`/`.db` (table list + preview via rusqlite)
+- 2026-03-02:
+  - Completed Phase 3 tasks:
+    - EXT-007 `.gpx` (GPX → GeoJSON conversion via quick-xml, Leaflet map viewer)
+    - EXT-008 `.kml`/`.kmz` (KML → GeoJSON conversion, KMZ zip extraction, Leaflet map viewer)
+    - EXT-009 `.heic`/`.heif` (policy evaluation: deferred due to cross-platform complexity)

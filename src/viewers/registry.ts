@@ -1,10 +1,12 @@
 import { docxViewerPlugin } from "./plugins/docx";
 import { duckdbViewerPlugin } from "./plugins/duckdb";
+import { gpxViewerPlugin } from "./plugins/gpx";
 import { htmlViewerPlugin } from "./plugins/html";
 import { imageViewerPlugin } from "./plugins/image";
 import { csvViewerPlugin } from "./plugins/csv";
 import { dxfViewerPlugin } from "./plugins/dxf";
 import { jsonViewerPlugin } from "./plugins/json";
+import { kmlViewerPlugin } from "./plugins/kml";
 import { markdownViewerPlugin } from "./plugins/markdown";
 import { pdfViewerPlugin } from "./plugins/pdf";
 import { parquetViewerPlugin } from "./plugins/parquet";
@@ -35,6 +37,8 @@ registerViewer(docxViewerPlugin);
 registerViewer(parquetViewerPlugin);
 registerViewer(duckdbViewerPlugin);
 registerViewer(sqliteViewerPlugin);
+registerViewer(gpxViewerPlugin);
+registerViewer(kmlViewerPlugin);
 registerViewer(imageViewerPlugin);
 registerViewer(pdfViewerPlugin);
 

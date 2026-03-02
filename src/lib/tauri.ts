@@ -7,6 +7,7 @@ import type {
   DuckDbTablePreviewData,
   FileContentData,
   FileEntry,
+  GeoJsonData,
   LaunchTarget,
   ParquetPreviewData,
   SearchFileResult,
@@ -124,6 +125,14 @@ export async function readSqliteTablePreview(
     tableName,
     maxRows
   });
+}
+
+export async function readGpx(path: string): Promise<GeoJsonData> {
+  return invoke<GeoJsonData>("read_gpx", { path });
+}
+
+export async function readKml(path: string): Promise<GeoJsonData> {
+  return invoke<GeoJsonData>("read_kml", { path });
 }
 
 export async function exportMarkdownToPdf(inputPath: string, outputPath: string): Promise<string> {

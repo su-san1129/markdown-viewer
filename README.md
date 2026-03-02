@@ -28,6 +28,8 @@ multiple file types from a folder tree with fast preview, search, and format-spe
   render)
 - Spreadsheet: `.xlsx`, `.xlsm`, `.xls`, `.ods` (sheet tabs + table preview)
 - Document: `.docx`, `.odt`, `.rtf` (paragraph text extraction preview)
+- GPX: `.gpx` (waypoints, tracks, routes on interactive map)
+- KML/KMZ: `.kml`, `.kmz` (placemarks, lines, polygons on interactive map)
 - DuckDB: `.duckdb`, `.ddb` (table list + preview)
 - SQLite: `.sqlite`, `.sqlite3`, `.db` (table list + preview)
 - Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`, `.tif`, `.tiff`

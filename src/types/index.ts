@@ -41,6 +41,10 @@ export interface DocxTextData {
   text: string;
 }
 
+export interface GeoJsonData {
+  geojson: string;
+}
+
 export interface FileContentData {
   content: string;
   encoding: string;

@@ -5,7 +5,8 @@ import {
   FileSpreadsheet,
   FileText,
   FileType,
-  type LucideIcon
+  type LucideIcon,
+  MapPin
 } from "lucide-react";
 import { getFileExtension } from "../viewers/fileTypes";
 import { isTextSpecialFileName, textExtensions } from "../viewers/textFormats";
@@ -41,6 +42,10 @@ export function resolveFileIcon(path: string): FileIconMeta {
 
   if (extension === "json" || extension === "geojson") {
     return { Icon: FileJson, color: "#cb8cff" };
+  }
+
+  if (extension === "gpx" || extension === "kml" || extension === "kmz") {
+    return { Icon: MapPin, color: "#4fc3f7" };
   }
 
   if (

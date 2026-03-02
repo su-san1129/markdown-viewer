@@ -201,6 +201,8 @@ const initialState: AppState = {
     { id: "parquet", label: "Parquet", extensions: ["parquet"], searchable: false },
     { id: "duckdb", label: "DuckDB", extensions: ["duckdb", "ddb"], searchable: false },
     { id: "sqlite", label: "SQLite", extensions: ["sqlite", "sqlite3", "db"], searchable: false },
+    { id: "gpx", label: "GPX", extensions: ["gpx"], searchable: false },
+    { id: "kml", label: "KML", extensions: ["kml", "kmz"], searchable: false },
     {
       id: "image",
       label: "Image",
