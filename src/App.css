@@ -853,14 +853,51 @@ mark.find-highlight-current {
 }
 
 .geojson-status {
-  height: 28px;
+  min-height: 28px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 0 10px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-secondary);
   font-size: var(--font-ui);
   user-select: none;
+}
+
+.geojson-status-left {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geojson-status-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.geojson-resolution-label {
+  color: var(--text-secondary);
+}
+
+.geojson-resolution-select {
+  height: 22px;
+  min-width: 64px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: var(--font-ui);
+}
+
+.geojson-resolution-meta {
+  color: var(--text-muted);
+  font-size: var(--font-label);
 }
 
 .geojson-map {

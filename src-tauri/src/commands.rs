@@ -7,10 +7,14 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use rusqlite::Connection as SqliteConnection;
 use serde::Serialize;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -118,6 +122,70 @@ pub struct SqliteTablePreviewData {
 pub struct GeoJsonData {
     pub geojson: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMetaData {
+    pub size_bytes: u64,
+    pub extension: String,
+    pub mime_guess: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoJsonTileSessionData {
+    pub dataset_id: String,
+    pub bounds: Option<[f64; 4]>,
+    pub min_zoom: u8,
+    pub max_zoom: u8,
+    pub total_features: usize,
+    pub max_features_per_tile: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoJsonTileData {
+    pub features: Vec<Value>,
+    pub total_features: usize,
+    pub truncated: bool,
+    pub simplified_features: usize,
+    pub fallback_features: usize,
+    pub lod_tolerance: f64,
+    pub lod_mode: String,
+}
+
+#[derive(Default)]
+pub struct GeoJsonTileStore {
+    sessions: Mutex<HashMap<String, GeoJsonTileSession>>,
+}
+
+#[derive(Debug, Clone)]
+struct GeoJsonTileSession {
+    indexed_features: Vec<IndexedFeature>,
+    file_size_bytes: u64,
+    total_features: usize,
+    min_zoom: u8,
+    max_zoom: u8,
+    max_features_per_tile: usize,
+    tile_cache: HashMap<String, GeoJsonTileData>,
+    resolved_auto_mode: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct IndexedFeature {
+    feature: Value,
+    bbox: Option<BBox>,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct BBox {
+    min_lng: f64,
+    min_lat: f64,
+    max_lng: f64,
+    max_lat: f64,
+}
+
+static GEOJSON_TILE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn text_extensions() -> Vec<String> {
     vec![
@@ -1924,6 +1992,763 @@ pub async fn read_directory_tree(path: String) -> Result<Vec<FileEntry>, String>
 #[tauri::command]
 pub async fn get_supported_file_types() -> Result<Vec<SupportedFileType>, String> {
     Ok(supported_file_types())
+}
+
+fn guess_mime_from_extension(path: &Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        "geojson" => "application/geo+json",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "txt" | "log" | "md" | "markdown" | "xml" => "text/plain",
+        "kml" => "application/vnd.google-earth.kml+xml",
+        "kmz" => "application/vnd.google-earth.kmz",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn decode_text_bytes(bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+
+    if let Ok(content) = std::str::from_utf8(bytes) {
+        return Ok(content.to_string());
+    }
+
+    let mut detector = EncodingDetector::new();
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, true);
+    let (decoded, _, _) = encoding.decode(bytes);
+    Ok(decoded.into_owned())
+}
+
+fn is_finite_number(value: &Value) -> Option<f64> {
+    let num = value.as_f64()?;
+    if num.is_finite() { Some(num) } else { None }
+}
+
+fn merge_bbox(base: Option<BBox>, next: Option<BBox>) -> Option<BBox> {
+    match (base, next) {
+        (None, None) => None,
+        (Some(b), None) => Some(b),
+        (None, Some(n)) => Some(n),
+        (Some(b), Some(n)) => Some(BBox {
+            min_lng: b.min_lng.min(n.min_lng),
+            min_lat: b.min_lat.min(n.min_lat),
+            max_lng: b.max_lng.max(n.max_lng),
+            max_lat: b.max_lat.max(n.max_lat),
+        }),
+    }
+}
+
+fn point_bbox(point: &[Value]) -> Option<BBox> {
+    if point.len() < 2 {
+        return None;
+    }
+    let lng = is_finite_number(&point[0])?;
+    let lat = is_finite_number(&point[1])?;
+    Some(BBox {
+        min_lng: lng,
+        min_lat: lat,
+        max_lng: lng,
+        max_lat: lat,
+    })
+}
+
+fn bbox_from_coordinates(value: &Value) -> Option<BBox> {
+    if let Some(point) = value.as_array() {
+        if !point.is_empty() && point[0].is_number() {
+            return point_bbox(point);
+        }
+        let mut bbox: Option<BBox> = None;
+        for entry in point {
+            bbox = merge_bbox(bbox, bbox_from_coordinates(entry));
+        }
+        return bbox;
+    }
+    None
+}
+
+fn geometry_bbox(geometry: &Value) -> Option<BBox> {
+    let obj = geometry.as_object()?;
+    let geometry_type = obj.get("type")?.as_str()?;
+    if geometry_type == "GeometryCollection" {
+        let geometries = obj.get("geometries")?.as_array()?;
+        let mut bbox: Option<BBox> = None;
+        for g in geometries {
+            bbox = merge_bbox(bbox, geometry_bbox(g));
+        }
+        return bbox;
+    }
+    bbox_from_coordinates(obj.get("coordinates")?)
+}
+
+fn extract_indexed_features(root: Value) -> Result<(Vec<IndexedFeature>, Option<[f64; 4]>), String> {
+    let mut indexed_features = Vec::new();
+    let mut all_bounds: Option<BBox> = None;
+
+    let Some(root_obj) = root.as_object() else {
+        return Err("JSON root must be an object".to_string());
+    };
+    let Some(root_type) = root_obj.get("type").and_then(|v| v.as_str()) else {
+        return Err("GeoJSON object must include type".to_string());
+    };
+
+    let push_feature = |feature: Value,
+                        indexed_features: &mut Vec<IndexedFeature>,
+                        all_bounds: &mut Option<BBox>| {
+        let bbox = feature
+            .as_object()
+            .and_then(|obj| obj.get("geometry"))
+            .and_then(geometry_bbox);
+        *all_bounds = merge_bbox(*all_bounds, bbox);
+        indexed_features.push(IndexedFeature { feature, bbox });
+    };
+
+    match root_type {
+        "FeatureCollection" => {
+            let features = root_obj
+                .get("features")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| "FeatureCollection must include features array".to_string())?;
+            for feature in features {
+                push_feature(feature.clone(), &mut indexed_features, &mut all_bounds);
+            }
+        }
+        "Feature" => {
+            push_feature(root, &mut indexed_features, &mut all_bounds);
+        }
+        _ => {
+            let feature = serde_json::json!({
+                "type": "Feature",
+                "properties": {},
+                "geometry": root
+            });
+            push_feature(feature, &mut indexed_features, &mut all_bounds);
+        }
+    }
+
+    let bounds = all_bounds.map(|b| [b.min_lng, b.min_lat, b.max_lng, b.max_lat]);
+    Ok((indexed_features, bounds))
+}
+
+fn tile_bbox(z: u8, x: u32, y: u32) -> BBox {
+    let n = 2f64.powi(i32::from(z));
+    let x_f = x as f64;
+    let y_f = y as f64;
+    let lng1 = (x_f / n) * 360.0 - 180.0;
+    let lng2 = ((x_f + 1.0) / n) * 360.0 - 180.0;
+
+    let lat1 = (std::f64::consts::PI * (1.0 - 2.0 * y_f / n))
+        .sinh()
+        .atan()
+        .to_degrees();
+    let lat2 = (std::f64::consts::PI * (1.0 - 2.0 * (y_f + 1.0) / n))
+        .sinh()
+        .atan()
+        .to_degrees();
+
+    BBox {
+        min_lng: lng1,
+        min_lat: lat2,
+        max_lng: lng2,
+        max_lat: lat1,
+    }
+}
+
+fn bbox_intersects(a: BBox, b: BBox) -> bool {
+    !(a.max_lng < b.min_lng || a.min_lng > b.max_lng || a.max_lat < b.min_lat || a.min_lat > b.max_lat)
+}
+
+fn lod_tolerance_for_zoom(z: u8, bbox: BBox) -> f64 {
+    let span = (bbox.max_lng - bbox.min_lng)
+        .abs()
+        .max((bbox.max_lat - bbox.min_lat).abs())
+        .max(0.000_001);
+    let ratio = match z {
+        0..=4 => 0.03,
+        5..=7 => 0.012,
+        8..=10 => 0.004,
+        _ => 0.0008,
+    };
+    (span * ratio).max(0.000_000_1)
+}
+
+fn resolve_lod_mode(
+    requested: Option<&str>,
+    file_size_bytes: u64,
+    total_features: usize,
+    auto_cpu_cores: Option<u32>,
+    auto_device_memory_gb: Option<f64>,
+) -> &'static str {
+    match requested {
+        Some("low") => "low",
+        Some("medium") => "medium",
+        Some("high") => "high",
+        Some("auto") | None => {
+            let mut score = 0i32;
+            if file_size_bytes >= 150 * 1024 * 1024 {
+                score += 3;
+            } else if file_size_bytes >= 40 * 1024 * 1024 {
+                score += 2;
+            } else if file_size_bytes >= 15 * 1024 * 1024 {
+                score += 1;
+            }
+
+            if total_features >= 500_000 {
+                score += 3;
+            } else if total_features >= 150_000 {
+                score += 2;
+            } else if total_features >= 50_000 {
+                score += 1;
+            }
+
+            if let Some(cores) = auto_cpu_cores {
+                if cores <= 4 {
+                    score += 2;
+                } else if cores <= 8 {
+                    score += 1;
+                }
+            }
+
+            if let Some(memory_gb) = auto_device_memory_gb {
+                if memory_gb <= 8.0 {
+                    score += 2;
+                } else if memory_gb <= 16.0 {
+                    score += 1;
+                }
+            }
+
+            if score >= 6 {
+                "low"
+            } else if score >= 3 {
+                "medium"
+            } else {
+                "high"
+            }
+        }
+        Some(_) => "medium",
+    }
+}
+
+fn lod_mode_scale(mode: &str) -> f64 {
+    match mode {
+        "low" => 1.0,
+        "medium" => 0.55,
+        "high" => 0.25,
+        _ => 0.55,
+    }
+}
+
+fn point_xy(value: &Value) -> Option<(f64, f64)> {
+    let point = value.as_array()?;
+    if point.len() < 2 {
+        return None;
+    }
+    let x = is_finite_number(&point[0])?;
+    let y = is_finite_number(&point[1])?;
+    Some((x, y))
+}
+
+fn point_line_distance(p: (f64, f64), start: (f64, f64), end: (f64, f64)) -> f64 {
+    let (px, py) = p;
+    let (sx, sy) = start;
+    let (ex, ey) = end;
+    let dx = ex - sx;
+    let dy = ey - sy;
+    if dx.abs() < f64::EPSILON && dy.abs() < f64::EPSILON {
+        return ((px - sx).powi(2) + (py - sy).powi(2)).sqrt();
+    }
+    let area2 = (px - sx) * dy - (py - sy) * dx;
+    area2.abs() / (dx.powi(2) + dy.powi(2)).sqrt()
+}
+
+fn dp_mark(points: &[(f64, f64)], keep: &mut [bool], start: usize, end: usize, tolerance: f64) {
+    if end <= start + 1 {
+        return;
+    }
+
+    let start_point = points[start];
+    let end_point = points[end];
+    let mut max_distance = 0.0;
+    let mut max_index = 0usize;
+
+    for idx in (start + 1)..end {
+        let dist = point_line_distance(points[idx], start_point, end_point);
+        if dist > max_distance {
+            max_distance = dist;
+            max_index = idx;
+        }
+    }
+
+    if max_distance > tolerance {
+        keep[max_index] = true;
+        dp_mark(points, keep, start, max_index, tolerance);
+        dp_mark(points, keep, max_index, end, tolerance);
+    }
+}
+
+fn simplify_positions(coords: &[Value], tolerance: f64) -> Option<Vec<Value>> {
+    if coords.len() <= 2 {
+        return Some(coords.to_vec());
+    }
+
+    let mut points = Vec::with_capacity(coords.len());
+    for value in coords {
+        points.push(point_xy(value)?);
+    }
+
+    let mut keep = vec![false; coords.len()];
+    keep[0] = true;
+    keep[coords.len() - 1] = true;
+    dp_mark(&points, &mut keep, 0, coords.len() - 1, tolerance);
+
+    let mut simplified = Vec::new();
+    for (idx, value) in coords.iter().enumerate() {
+        if keep[idx] {
+            simplified.push(value.clone());
+        }
+    }
+    Some(simplified)
+}
+
+fn ring_signed_area(ring: &[Value]) -> Option<f64> {
+    if ring.len() < 4 {
+        return None;
+    }
+    let mut sum = 0.0;
+    for idx in 0..(ring.len() - 1) {
+        let (x1, y1) = point_xy(&ring[idx])?;
+        let (x2, y2) = point_xy(&ring[idx + 1])?;
+        sum += x1 * y2 - x2 * y1;
+    }
+    Some(0.5 * sum)
+}
+
+fn orientation(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+}
+
+fn on_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> bool {
+    p.0 >= a.0.min(b.0) - 1e-12
+        && p.0 <= a.0.max(b.0) + 1e-12
+        && p.1 >= a.1.min(b.1) - 1e-12
+        && p.1 <= a.1.max(b.1) + 1e-12
+}
+
+fn segments_intersect(a1: (f64, f64), a2: (f64, f64), b1: (f64, f64), b2: (f64, f64)) -> bool {
+    let o1 = orientation(a1, a2, b1);
+    let o2 = orientation(a1, a2, b2);
+    let o3 = orientation(b1, b2, a1);
+    let o4 = orientation(b1, b2, a2);
+
+    if (o1 > 0.0 && o2 < 0.0 || o1 < 0.0 && o2 > 0.0)
+        && (o3 > 0.0 && o4 < 0.0 || o3 < 0.0 && o4 > 0.0)
+    {
+        return true;
+    }
+
+    if o1.abs() <= 1e-12 && on_segment(a1, a2, b1) {
+        return true;
+    }
+    if o2.abs() <= 1e-12 && on_segment(a1, a2, b2) {
+        return true;
+    }
+    if o3.abs() <= 1e-12 && on_segment(b1, b2, a1) {
+        return true;
+    }
+    if o4.abs() <= 1e-12 && on_segment(b1, b2, a2) {
+        return true;
+    }
+    false
+}
+
+fn ring_self_intersects(ring: &[Value]) -> Option<bool> {
+    if ring.len() < 5 {
+        return Some(false);
+    }
+    let mut points = Vec::with_capacity(ring.len());
+    for entry in ring {
+        points.push(point_xy(entry)?);
+    }
+
+    let segment_count = points.len() - 1;
+    for i in 0..segment_count {
+        let a1 = points[i];
+        let a2 = points[i + 1];
+        for j in (i + 1)..segment_count {
+            if j == i || j == i + 1 {
+                continue;
+            }
+            if i == 0 && j == segment_count - 1 {
+                continue;
+            }
+            let b1 = points[j];
+            let b2 = points[j + 1];
+            if segments_intersect(a1, a2, b1, b2) {
+                return Some(true);
+            }
+        }
+    }
+    Some(false)
+}
+
+fn simplify_ring(ring: &[Value], tolerance: f64) -> Option<Vec<Value>> {
+    if ring.len() < 4 {
+        return Some(ring.to_vec());
+    }
+
+    let body = if ring.first() == ring.last() {
+        &ring[..ring.len() - 1]
+    } else {
+        ring
+    };
+    if body.len() < 3 {
+        return Some(ring.to_vec());
+    }
+
+    let mut simplified_body = simplify_positions(body, tolerance)?;
+    if simplified_body.len() < 3 {
+        return None;
+    }
+
+    simplified_body.push(simplified_body[0].clone());
+    if simplified_body.len() < 4 {
+        return None;
+    }
+
+    let original_area = ring_signed_area(ring).map(|v| v.abs()).unwrap_or(0.0);
+    let simplified_area = ring_signed_area(&simplified_body).map(|v| v.abs()).unwrap_or(0.0);
+    if original_area > 0.0 && simplified_area < original_area * 0.01 {
+        return None;
+    }
+
+    if ring_self_intersects(&simplified_body)? {
+        return None;
+    }
+
+    Some(simplified_body)
+}
+
+fn simplify_geometry_inner(geometry: &Value, tolerance: f64) -> Option<Value> {
+    let geometry_obj = geometry.as_object()?;
+    let geometry_type = geometry_obj.get("type")?.as_str()?;
+
+    match geometry_type {
+        "Point" | "MultiPoint" => Some(geometry.clone()),
+        "LineString" => {
+            let coordinates = geometry_obj.get("coordinates")?.as_array()?;
+            let simplified = simplify_positions(coordinates, tolerance)?;
+            if simplified.len() < 2 {
+                return None;
+            }
+            let mut out = geometry_obj.clone();
+            out.insert("coordinates".to_string(), Value::Array(simplified));
+            Some(Value::Object(out))
+        }
+        "MultiLineString" => {
+            let lines = geometry_obj.get("coordinates")?.as_array()?;
+            let mut simplified_lines = Vec::with_capacity(lines.len());
+            for line in lines {
+                let line_coords = line.as_array()?;
+                let simplified = simplify_positions(line_coords, tolerance)?;
+                if simplified.len() < 2 {
+                    return None;
+                }
+                simplified_lines.push(Value::Array(simplified));
+            }
+            let mut out = geometry_obj.clone();
+            out.insert("coordinates".to_string(), Value::Array(simplified_lines));
+            Some(Value::Object(out))
+        }
+        "Polygon" => {
+            let rings = geometry_obj.get("coordinates")?.as_array()?;
+            if rings.is_empty() {
+                return Some(geometry.clone());
+            }
+
+            let mut simplified_rings = Vec::with_capacity(rings.len());
+            let outer_ring = rings[0].as_array()?;
+            simplified_rings.push(Value::Array(simplify_ring(outer_ring, tolerance)?));
+
+            for hole in rings.iter().skip(1) {
+                let hole_ring = hole.as_array()?;
+                match simplify_ring(hole_ring, tolerance) {
+                    Some(simplified_hole) => simplified_rings.push(Value::Array(simplified_hole)),
+                    None => simplified_rings.push(Value::Array(hole_ring.to_vec())),
+                }
+            }
+
+            let mut out = geometry_obj.clone();
+            out.insert("coordinates".to_string(), Value::Array(simplified_rings));
+            Some(Value::Object(out))
+        }
+        "MultiPolygon" => {
+            let polygons = geometry_obj.get("coordinates")?.as_array()?;
+            let mut simplified_polygons = Vec::with_capacity(polygons.len());
+            for polygon in polygons {
+                let polygon_rings = polygon.as_array()?;
+                if polygon_rings.is_empty() {
+                    simplified_polygons.push(Value::Array(polygon_rings.to_vec()));
+                    continue;
+                }
+                let mut simplified_rings = Vec::with_capacity(polygon_rings.len());
+                let outer_ring = polygon_rings[0].as_array()?;
+                simplified_rings.push(Value::Array(simplify_ring(outer_ring, tolerance)?));
+
+                for hole in polygon_rings.iter().skip(1) {
+                    let hole_ring = hole.as_array()?;
+                    match simplify_ring(hole_ring, tolerance) {
+                        Some(simplified_hole) => {
+                            simplified_rings.push(Value::Array(simplified_hole))
+                        }
+                        None => simplified_rings.push(Value::Array(hole_ring.to_vec())),
+                    }
+                }
+                simplified_polygons.push(Value::Array(simplified_rings));
+            }
+
+            let mut out = geometry_obj.clone();
+            out.insert("coordinates".to_string(), Value::Array(simplified_polygons));
+            Some(Value::Object(out))
+        }
+        "GeometryCollection" => {
+            let geometries = geometry_obj.get("geometries")?.as_array()?;
+            let mut simplified_geometries = Vec::with_capacity(geometries.len());
+            for child in geometries {
+                simplified_geometries.push(simplify_geometry_inner(child, tolerance)?);
+            }
+            let mut out = geometry_obj.clone();
+            out.insert("geometries".to_string(), Value::Array(simplified_geometries));
+            Some(Value::Object(out))
+        }
+        _ => Some(geometry.clone()),
+    }
+}
+
+fn simplify_geometry_with_fallback(geometry: &Value, tolerance: f64) -> (Value, bool, bool) {
+    if geometry.is_null() {
+        return (Value::Null, false, false);
+    }
+    match simplify_geometry_inner(geometry, tolerance) {
+        Some(simplified) => {
+            let changed = simplified != *geometry;
+            (simplified, changed, false)
+        }
+        None => (geometry.clone(), false, true),
+    }
+}
+
+#[tauri::command]
+pub async fn get_file_meta(path: String) -> Result<FileMetaData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+
+    let metadata = fs::metadata(file_path).map_err(|e| format!("Failed to read metadata: {}", e))?;
+    let extension = file_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    Ok(FileMetaData {
+        size_bytes: metadata.len(),
+        extension,
+        mime_guess: guess_mime_from_extension(file_path),
+    })
+}
+
+#[tauri::command]
+pub async fn prepare_geojson_tiles(
+    path: String,
+    state: tauri::State<'_, GeoJsonTileStore>,
+    max_features_per_tile: Option<usize>,
+    min_zoom: Option<u8>,
+    max_zoom: Option<u8>,
+) -> Result<GeoJsonTileSessionData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+
+    let file_size_bytes = fs::metadata(file_path)
+        .map_err(|e| format!("Failed to read metadata: {}", e))?
+        .len();
+    let bytes = fs::read(file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let raw = decode_text_bytes(&bytes)?;
+    let root: Value = serde_json::from_str(&raw).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+    let (indexed_features, bounds) = extract_indexed_features(root)?;
+
+    let min_zoom = min_zoom.unwrap_or(0).min(20);
+    let mut max_zoom = max_zoom.unwrap_or(12).min(20);
+    if max_zoom < min_zoom {
+        max_zoom = min_zoom;
+    }
+    let max_features_per_tile = max_features_per_tile.unwrap_or(1500).max(100);
+
+    let dataset_id = format!(
+        "geojson-{}",
+        GEOJSON_TILE_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+
+    let total_features = indexed_features.len();
+    let session = GeoJsonTileSession {
+        indexed_features,
+        file_size_bytes,
+        total_features,
+        min_zoom,
+        max_zoom,
+        max_features_per_tile,
+        tile_cache: HashMap::new(),
+        resolved_auto_mode: None,
+    };
+
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "GeoJSON tile store is poisoned".to_string())?;
+    sessions.insert(dataset_id.clone(), session);
+
+    Ok(GeoJsonTileSessionData {
+        dataset_id,
+        bounds,
+        min_zoom,
+        max_zoom,
+        total_features,
+        max_features_per_tile,
+    })
+}
+
+#[tauri::command]
+pub async fn read_geojson_tile(
+    dataset_id: String,
+    z: u8,
+    x: u32,
+    y: u32,
+    resolution_mode: Option<String>,
+    auto_cpu_cores: Option<u32>,
+    auto_device_memory_gb: Option<f64>,
+    state: tauri::State<'_, GeoJsonTileStore>,
+) -> Result<GeoJsonTileData, String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "GeoJSON tile store is poisoned".to_string())?;
+    let session = sessions
+        .get_mut(&dataset_id)
+        .ok_or_else(|| format!("GeoJSON tile session not found: {}", dataset_id))?;
+
+    let z = z.clamp(session.min_zoom, session.max_zoom);
+    let target_bbox = tile_bbox(z, x, y);
+    let mode = match resolution_mode.as_deref() {
+        Some("low") => "low".to_string(),
+        Some("medium") => "medium".to_string(),
+        Some("high") => "high".to_string(),
+        Some("auto") | None => {
+            if let Some(mode) = &session.resolved_auto_mode {
+                mode.clone()
+            } else {
+                let resolved = resolve_lod_mode(
+                    Some("auto"),
+                    session.file_size_bytes,
+                    session.total_features,
+                    auto_cpu_cores,
+                    auto_device_memory_gb,
+                )
+                .to_string();
+                session.resolved_auto_mode = Some(resolved.clone());
+                resolved
+            }
+        }
+        Some(_) => "medium".to_string(),
+    };
+    let cache_key = format!("{}/{}/{}/{}", z, x, y, mode);
+    if let Some(cached) = session.tile_cache.get(&cache_key) {
+        return Ok(cached.clone());
+    }
+
+    let lod_tolerance = lod_tolerance_for_zoom(z, target_bbox) * lod_mode_scale(&mode);
+
+    let mut features = Vec::new();
+    let mut total_features = 0usize;
+    let mut simplified_features = 0usize;
+    let mut fallback_features = 0usize;
+
+    for indexed in &session.indexed_features {
+        let matches = match indexed.bbox {
+            Some(bbox) => bbox_intersects(bbox, target_bbox),
+            None => true,
+        };
+        if !matches {
+            continue;
+        }
+
+        total_features += 1;
+        if features.len() < session.max_features_per_tile {
+            let mut feature = indexed.feature.clone();
+            let mut simplified_applied = false;
+            let mut fallback_applied = false;
+
+            if let Some(feature_obj) = feature.as_object_mut() {
+                if let Some(geometry) = feature_obj.get("geometry") {
+                    let (geometry_out, changed, fallback) =
+                        simplify_geometry_with_fallback(geometry, lod_tolerance);
+                    feature_obj.insert("geometry".to_string(), geometry_out);
+                    simplified_applied = changed;
+                    fallback_applied = fallback;
+                }
+            }
+
+            if simplified_applied {
+                simplified_features += 1;
+            }
+            if fallback_applied {
+                fallback_features += 1;
+            }
+            features.push(feature);
+        }
+    }
+
+    let result = GeoJsonTileData {
+        features,
+        total_features,
+        truncated: total_features > session.max_features_per_tile,
+        simplified_features,
+        fallback_features,
+        lod_tolerance,
+        lod_mode: mode,
+    };
+    session.tile_cache.insert(cache_key, result.clone());
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn release_geojson_tiles(
+    dataset_id: String,
+    state: tauri::State<'_, GeoJsonTileStore>,
+) -> Result<(), String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "GeoJSON tile store is poisoned".to_string())?;
+    sessions.remove(&dataset_id);
+    Ok(())
 }
 
 #[tauri::command]

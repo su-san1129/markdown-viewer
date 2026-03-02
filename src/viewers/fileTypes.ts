@@ -18,8 +18,6 @@ const RAW_TEXT_CONTENT_EXTENSIONS = new Set([
   "markdown",
   "html",
   "htm",
-  "json",
-  "geojson",
   "dxf",
   ...textExtensions
 ]);

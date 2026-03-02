@@ -7,7 +7,10 @@ import type {
   DuckDbTablePreviewData,
   FileContentData,
   FileEntry,
+  FileMetaData,
   GeoJsonData,
+  GeoJsonTileData,
+  GeoJsonTileSessionData,
   LaunchTarget,
   ParquetPreviewData,
   SearchFileResult,
@@ -32,6 +35,10 @@ export async function savePdfDialog(defaultPath: string): Promise<string | null>
 
 export async function readDirectoryTree(path: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("read_directory_tree", { path });
+}
+
+export async function getFileMeta(path: string): Promise<FileMetaData> {
+  return invoke<FileMetaData>("get_file_meta", { path });
 }
 
 export async function readFileContent(path: string): Promise<FileContentData> {
@@ -133,6 +140,48 @@ export async function readGpx(path: string): Promise<GeoJsonData> {
 
 export async function readKml(path: string): Promise<GeoJsonData> {
   return invoke<GeoJsonData>("read_kml", { path });
+}
+
+export async function prepareGeoJsonTiles(
+  path: string,
+  options?: {
+    maxFeaturesPerTile?: number;
+    minZoom?: number;
+    maxZoom?: number;
+  }
+): Promise<GeoJsonTileSessionData> {
+  return invoke<GeoJsonTileSessionData>("prepare_geojson_tiles", {
+    path,
+    maxFeaturesPerTile: options?.maxFeaturesPerTile,
+    minZoom: options?.minZoom,
+    maxZoom: options?.maxZoom
+  });
+}
+
+export async function readGeoJsonTile(
+  datasetId: string,
+  z: number,
+  x: number,
+  y: number,
+  options?: {
+    resolutionMode?: "auto" | "low" | "medium" | "high";
+    autoCpuCores?: number;
+    autoDeviceMemoryGb?: number;
+  }
+): Promise<GeoJsonTileData> {
+  return invoke<GeoJsonTileData>("read_geojson_tile", {
+    datasetId,
+    z,
+    x,
+    y,
+    resolutionMode: options?.resolutionMode,
+    autoCpuCores: options?.autoCpuCores,
+    autoDeviceMemoryGb: options?.autoDeviceMemoryGb
+  });
+}
+
+export async function releaseGeoJsonTiles(datasetId: string): Promise<void> {
+  await invoke("release_geojson_tiles", { datasetId });
 }
 
 export async function exportMarkdownToPdf(inputPath: string, outputPath: string): Promise<string> {

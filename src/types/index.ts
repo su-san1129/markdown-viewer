@@ -45,6 +45,31 @@ export interface GeoJsonData {
   geojson: string;
 }
 
+export interface FileMetaData {
+  sizeBytes: number;
+  extension: string;
+  mimeGuess: string;
+}
+
+export interface GeoJsonTileSessionData {
+  datasetId: string;
+  bounds: [number, number, number, number] | null;
+  minZoom: number;
+  maxZoom: number;
+  totalFeatures: number;
+  maxFeaturesPerTile: number;
+}
+
+export interface GeoJsonTileData {
+  features: GeoJSON.Feature[];
+  totalFeatures: number;
+  truncated: boolean;
+  simplifiedFeatures: number;
+  fallbackFeatures: number;
+  lodTolerance: number;
+  lodMode: "low" | "medium" | "high";
+}
+
 export interface FileContentData {
   content: string;
   encoding: string;

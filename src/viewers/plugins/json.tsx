@@ -1,7 +1,8 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { parseGeoJson } from "../geojson";
-import { GeoJsonMapViewer } from "./geojson";
+import { readFileContent } from "../../lib/tauri";
+import { parseGeoJsonValue } from "../geojson";
+import { GeoJsonTileMapViewer } from "./geojson";
 import type { ViewerPlugin } from "../types";
 
 type JsonPrimitive = string | number | boolean | null;
@@ -127,34 +128,126 @@ function JsonTreeViewer({ value }: { value: JsonValue; }) {
   return <JsonTreeNode node={rootNode} depth={0} />;
 }
 
+function JsonViewer({
+  filePath,
+  initialContent,
+  contentRef
+}: {
+  filePath: string;
+  initialContent: string;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const isGeoJsonExtension = extension === "geojson";
+
+  useEffect(() => {
+    setContent(initialContent);
+    setLoadError(null);
+  }, [filePath, initialContent]);
+
+  useEffect(() => {
+    if (isGeoJsonExtension) return;
+    if (content.length > 0) return;
+
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const data = await readFileContent(filePath);
+        if (!cancelled) {
+          setContent(data.content);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(String(e));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [content.length, filePath, isGeoJsonExtension]);
+
+  const parseResult = useMemo(() => {
+    if (isGeoJsonExtension) {
+      return { ok: false as const, reason: "geojson-extension" };
+    }
+    if (!content) {
+      return { ok: false as const, reason: "not-ready" };
+    }
+    try {
+      const parsed = JSON.parse(content) as unknown;
+      const geoJsonResult = parseGeoJsonValue(parsed);
+      return {
+        ok: true as const,
+        parsed: parsed as JsonValue,
+        geoJsonResult
+      };
+    } catch {
+      return { ok: false as const, reason: "invalid-json" };
+    }
+  }, [content, isGeoJsonExtension]);
+
+  if (isGeoJsonExtension) {
+    return <GeoJsonTileMapViewer filePath={filePath} contentRef={contentRef} />;
+  }
+
+  if (loading) {
+    return (
+      <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto", padding: "var(--sp-4)" }}>
+        JSONを読み込み中...
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto", padding: "var(--sp-4)" }}>
+        <p style={{ marginBottom: "var(--sp-3)", color: "#f14c4c" }}>
+          読み込みに失敗しました: {loadError}
+        </p>
+      </div>
+    );
+  }
+
+  if (!parseResult.ok) {
+    return (
+      <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto" }}>
+        <p style={{ marginBottom: "var(--sp-3)", color: "#f14c4c" }}>
+          JSONの解析に失敗しました。生テキストを表示します。
+        </p>
+        <pre className="plain-text-view">{content}</pre>
+      </div>
+    );
+  }
+
+  if (parseResult.geoJsonResult.ok) {
+    return <GeoJsonTileMapViewer filePath={filePath} contentRef={contentRef} />;
+  }
+
+  return (
+    <div ref={contentRef} className="json-tree" style={{ maxWidth: 1200, margin: "0 auto" }}>
+      <JsonTreeViewer value={parseResult.parsed} />
+    </div>
+  );
+}
+
 export const jsonViewerPlugin: ViewerPlugin = {
   id: "json",
   label: "JSON",
   extensions: ["json", "geojson"],
   supportsFind: true,
-  render({ content, contentRef }) {
-    try {
-      const parsed = JSON.parse(content) as JsonValue;
-      const geoJsonResult = parseGeoJson(content);
-
-      if (geoJsonResult.ok) {
-        return <GeoJsonMapViewer geojson={geoJsonResult.geojson} contentRef={contentRef} />;
-      }
-
-      return (
-        <div ref={contentRef} className="json-tree" style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <JsonTreeViewer value={parsed} />
-        </div>
-      );
-    } catch {
-      return (
-        <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <p style={{ marginBottom: "var(--sp-3)", color: "#f14c4c" }}>
-            JSONの解析に失敗しました。生テキストを表示します。
-          </p>
-          <pre className="plain-text-view">{content}</pre>
-        </div>
-      );
-    }
+  render({ filePath, content, contentRef }) {
+    return <JsonViewer filePath={filePath} initialContent={content} contentRef={contentRef} />;
   }
 };

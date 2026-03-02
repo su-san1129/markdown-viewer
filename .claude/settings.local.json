@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/takahirosuzuki/workspace/view-bomber -name CLAUDE.md -o -name .claude*)",
+      "Bash(wc -l /Users/takahirosuzuki/workspace/view-bomber/plans/*.md)",
+      "Bash(grep -i \"item\\\\|support\" /Users/takahirosuzuki/workspace/view-bomber/plans/*.md)",
+      "Bash(cargo test)",
+      "Bash(bun run check)"
+    ]
+  }
+}

@@ -97,11 +97,18 @@ export function parseGeoJson(content: string):
 {
   try {
     const parsed = JSON.parse(content) as unknown;
-    if (!isGeoJsonObject(parsed)) {
-      return { ok: false, reason: "JSON is not GeoJSON." };
-    }
-    return { ok: true, geojson: parsed };
+    return parseGeoJsonValue(parsed);
   } catch {
     return { ok: false, reason: "Failed to parse JSON." };
   }
+}
+
+export function parseGeoJsonValue(value: unknown):
+  | { ok: true; geojson: GeoJSON.GeoJsonObject; }
+  | { ok: false; reason: string; }
+{
+  if (!isGeoJsonObject(value)) {
+    return { ok: false, reason: "JSON is not GeoJSON." };
+  }
+  return { ok: true, geojson: value };
 }
