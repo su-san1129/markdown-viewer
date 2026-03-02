@@ -2,6 +2,7 @@ use calamine::{open_workbook_auto, Reader};
 use chardetng::EncodingDetector;
 use csv::{ByteRecord, ReaderBuilder};
 use duckdb::Connection;
+use rusqlite::Connection as SqliteConnection;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
@@ -97,6 +98,22 @@ pub struct DuckDbTableInfo {
     pub display_name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteTableInfo {
+    pub table_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteTablePreviewData {
+    pub table_name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub total_rows: usize,
+    pub truncated: bool,
+}
+
 fn text_extensions() -> Vec<String> {
     vec![
         "txt".to_string(),
@@ -174,7 +191,11 @@ fn spreadsheet_extensions() -> Vec<String> {
 }
 
 fn document_extensions() -> Vec<String> {
-    vec!["docx".to_string()]
+    vec![
+        "docx".to_string(),
+        "odt".to_string(),
+        "rtf".to_string(),
+    ]
 }
 
 fn parquet_extensions() -> Vec<String> {
@@ -183,6 +204,14 @@ fn parquet_extensions() -> Vec<String> {
 
 fn duckdb_extensions() -> Vec<String> {
     vec!["duckdb".to_string(), "ddb".to_string()]
+}
+
+fn sqlite_extensions() -> Vec<String> {
+    vec![
+        "sqlite".to_string(),
+        "sqlite3".to_string(),
+        "db".to_string(),
+    ]
 }
 
 fn supported_file_types() -> Vec<SupportedFileType> {
@@ -245,6 +274,12 @@ fn supported_file_types() -> Vec<SupportedFileType> {
             id: "duckdb".to_string(),
             label: "DuckDB".to_string(),
             extensions: duckdb_extensions(),
+            searchable: false,
+        },
+        SupportedFileType {
+            id: "sqlite".to_string(),
+            label: "SQLite".to_string(),
+            extensions: sqlite_extensions(),
             searchable: false,
         },
         SupportedFileType {
@@ -643,6 +678,186 @@ fn parse_docx_text(path: &Path) -> Result<String, String> {
     Ok(text)
 }
 
+fn parse_odt_text(path: &Path) -> Result<String, String> {
+    let file =
+        fs::File::open(path).map_err(|e| format!("Failed to open odt file: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read odt archive: {}", e))?;
+    let mut content_xml = archive
+        .by_name("content.xml")
+        .map_err(|e| format!("Failed to open content.xml: {}", e))?;
+
+    let mut xml = String::new();
+    content_xml
+        .read_to_string(&mut xml)
+        .map_err(|e| format!("Failed to read content XML: {}", e))?;
+
+    let mut reader = XmlReader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Text(event)) => {
+                if let Ok(decoded) = event.decode() {
+                    text.push_str(&decoded);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let name = event.name();
+                if name.as_ref() == b"text:p" || name.as_ref() == b"text:h" {
+                    text.push('\n');
+                }
+            }
+            Ok(Event::Empty(event)) => {
+                let name = event.name().as_ref().to_vec();
+                if name.as_slice() == b"text:tab" {
+                    text.push('\t');
+                } else if name.as_slice() == b"text:line-break" {
+                    text.push('\n');
+                }
+            }
+            Ok(_) => {}
+            Err(err) => {
+                return Err(format!("Failed to parse content XML: {}", err));
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(text)
+}
+
+fn parse_rtf_text(path: &Path) -> Result<String, String> {
+    let raw = fs::read(path).map_err(|e| format!("Failed to read rtf file: {}", e))?;
+    let bytes = &raw;
+    let mut text = String::new();
+    let mut i = 0;
+    let mut depth: i32 = 0;
+    let mut skip_depth: Option<i32> = None;
+
+    while i < bytes.len() {
+        let ch = bytes[i];
+
+        if let Some(sd) = skip_depth {
+            if ch == b'{' {
+                depth += 1;
+            } else if ch == b'}' {
+                depth -= 1;
+                if depth < sd {
+                    skip_depth = None;
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        match ch {
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                i += 1;
+            }
+            b'\\' => {
+                i += 1;
+                if i >= bytes.len() {
+                    break;
+                }
+                let next = bytes[i];
+
+                if next == b'\'' {
+                    // Hex escape: \'xx
+                    i += 1;
+                    if i + 1 < bytes.len() {
+                        if let Ok(hex_str) = std::str::from_utf8(&bytes[i..i + 2]) {
+                            if let Ok(val) = u8::from_str_radix(hex_str, 16) {
+                                text.push(val as char);
+                            }
+                        }
+                        i += 2;
+                    }
+                } else if next == b'\\' || next == b'{' || next == b'}' {
+                    text.push(next as char);
+                    i += 1;
+                } else if next == b'\n' || next == b'\r' {
+                    i += 1;
+                } else {
+                    // Read control word
+                    let start = i;
+                    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                        i += 1;
+                    }
+                    let word = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
+                    // Read optional numeric parameter
+                    let mut param: Option<i32> = None;
+                    if i < bytes.len()
+                        && (bytes[i] == b'-' || bytes[i].is_ascii_digit())
+                    {
+                        let param_start = i;
+                        if bytes[i] == b'-' {
+                            i += 1;
+                        }
+                        while i < bytes.len() && bytes[i].is_ascii_digit() {
+                            i += 1;
+                        }
+                        param = std::str::from_utf8(&bytes[param_start..i])
+                            .ok()
+                            .and_then(|s| s.parse().ok());
+                    }
+                    // Consume trailing space delimiter
+                    if i < bytes.len() && bytes[i] == b' ' {
+                        i += 1;
+                    }
+
+                    match word {
+                        "par" | "line" => text.push('\n'),
+                        "tab" => text.push('\t'),
+                        "u" => {
+                            if let Some(cp) = param {
+                                let cp =
+                                    if cp < 0 { (cp + 65536) as u32 } else { cp as u32 };
+                                if let Some(ch) = char::from_u32(cp) {
+                                    text.push(ch);
+                                }
+                            }
+                            // Skip replacement character
+                            if i < bytes.len()
+                                && bytes[i] != b'\\'
+                                && bytes[i] != b'{'
+                                && bytes[i] != b'}'
+                            {
+                                i += 1;
+                            }
+                        }
+                        "fonttbl" | "colortbl" | "stylesheet" | "info" | "pict"
+                        | "header" | "footer" | "headerl" | "headerr" | "footerl"
+                        | "footerr" | "footnote" => {
+                            skip_depth = Some(depth);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            b'\n' | b'\r' => {
+                i += 1;
+            }
+            _ => {
+                if depth >= 1 {
+                    text.push(ch as char);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    Ok(text)
+}
+
 fn parse_parquet_preview(path: &Path, max_rows: usize) -> Result<ParquetPreviewData, String> {
     let file = fs::File::open(path).map_err(|e| format!("Failed to open parquet file: {}", e))?;
     let reader = SerializedFileReader::new(file)
@@ -886,6 +1101,104 @@ fn read_duckdb_table_preview_internal(
     })
 }
 
+fn read_sqlite_tables_internal(path: &Path) -> Result<Vec<SqliteTableInfo>, String> {
+    let connection = SqliteConnection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .map_err(|e| format!("Failed to list SQLite tables: {}", e))?;
+
+    let tables = statement
+        .query_map([], |row| {
+            Ok(SqliteTableInfo {
+                table_name: row.get::<usize, String>(0)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query SQLite tables: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tables)
+}
+
+fn read_sqlite_table_preview_internal(
+    path: &Path,
+    table_name: &str,
+    max_rows: usize,
+) -> Result<SqliteTablePreviewData, String> {
+    let connection = SqliteConnection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| format!("Failed to open SQLite file: {}", e))?;
+
+    let quoted_table = quote_sql_identifier(table_name);
+
+    let count_sql = format!("SELECT COUNT(*) FROM {}", quoted_table);
+    let total_rows: usize = connection
+        .query_row(&count_sql, [], |row| row.get::<usize, i64>(0))
+        .map_err(|e| format!("Failed to count SQLite table rows: {}", e))?
+        .max(0) as usize;
+
+    let pragma_sql = format!("PRAGMA table_info({})", quoted_table);
+    let mut pragma_stmt = connection
+        .prepare(&pragma_sql)
+        .map_err(|e| format!("Failed to query SQLite columns: {}", e))?;
+    let columns: Vec<String> = pragma_stmt
+        .query_map([], |row| row.get::<usize, String>(1))
+        .map_err(|e| format!("Failed to iterate SQLite columns: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if columns.is_empty() {
+        return Err(format!("No columns found for table '{}'", table_name));
+    }
+
+    let select_list = columns
+        .iter()
+        .map(|col| format!("CAST({} AS TEXT)", quote_sql_identifier(col)))
+        .collect::<Vec<String>>()
+        .join(", ");
+    let preview_sql = format!(
+        "SELECT {} FROM {} LIMIT {}",
+        select_list, quoted_table, max_rows
+    );
+
+    let mut stmt = connection
+        .prepare(&preview_sql)
+        .map_err(|e| format!("Failed to query SQLite preview rows: {}", e))?;
+
+    let column_count = columns.len();
+    let rows: Vec<Vec<String>> = stmt
+        .query_map([], |row| {
+            let mut values = Vec::with_capacity(column_count);
+            for i in 0..column_count {
+                let val: Option<String> = row.get(i)?;
+                values.push(val.unwrap_or_default());
+            }
+            Ok(values)
+        })
+        .map_err(|e| format!("Failed to iterate SQLite preview rows: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let truncated = rows.len() < total_rows;
+
+    Ok(SqliteTablePreviewData {
+        table_name: table_name.to_string(),
+        columns,
+        rows,
+        total_rows,
+        truncated,
+    })
+}
+
 fn search_line_matches(
     lines: impl Iterator<Item = String>,
     query: &str,
@@ -953,13 +1266,20 @@ fn search_xlsx_file(
     search_line_matches(lines.into_iter(), query, query_lower, case_sensitive)
 }
 
-fn search_docx_file(
+fn search_document_file(
     path: &Path,
     query: &str,
     query_lower: &str,
     case_sensitive: bool,
 ) -> Vec<SearchMatch> {
-    let text = match parse_docx_text(path) {
+    let text = if has_extension(path, "odt") {
+        parse_odt_text(path)
+    } else if has_extension(path, "rtf") {
+        parse_rtf_text(path)
+    } else {
+        parse_docx_text(path)
+    };
+    let text = match text {
         Ok(text) => text,
         Err(_) => return Vec::new(),
     };
@@ -1267,11 +1587,20 @@ pub async fn read_docx_text(path: String) -> Result<DocxTextData, String> {
     if !file_path.is_file() {
         return Err(format!("Not a file: {}", path));
     }
-    if !has_extension(file_path, "docx") {
-        return Err("Target file is not .docx".to_string());
+    if !is_extension_in(file_path, &document_extensions()) {
+        return Err(
+            "対象ファイルはドキュメント形式(.docx/.odt/.rtf)ではありません".to_string(),
+        );
     }
 
-    parse_docx_text(file_path).map(|text| DocxTextData { text })
+    let text = if has_extension(file_path, "odt") {
+        parse_odt_text(file_path)
+    } else if has_extension(file_path, "rtf") {
+        parse_rtf_text(file_path)
+    } else {
+        parse_docx_text(file_path)
+    }?;
+    Ok(DocxTextData { text })
 }
 
 #[tauri::command]
@@ -1337,6 +1666,48 @@ pub async fn read_duckdb_table_preview(
         .map(|value| value.trim())
         .filter(|value| !value.is_empty());
     read_duckdb_table_preview_internal(file_path, schema_name, table_name.trim(), rows_limit)
+}
+
+#[tauri::command]
+pub async fn read_sqlite_tables(path: String) -> Result<Vec<SqliteTableInfo>, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !is_extension_in(file_path, &sqlite_extensions()) {
+        return Err(
+            "対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string(),
+        );
+    }
+    read_sqlite_tables_internal(file_path)
+}
+
+#[tauri::command]
+pub async fn read_sqlite_table_preview(
+    path: String,
+    table_name: String,
+    max_rows: Option<usize>,
+) -> Result<SqliteTablePreviewData, String> {
+    let file_path = Path::new(&path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if !is_extension_in(file_path, &sqlite_extensions()) {
+        return Err(
+            "対象ファイルはSQLite形式(.sqlite/.sqlite3/.db)ではありません".to_string(),
+        );
+    }
+    if table_name.trim().is_empty() {
+        return Err("table_name must not be empty".to_string());
+    }
+    let rows_limit = max_rows.unwrap_or(200).max(1);
+    read_sqlite_table_preview_internal(file_path, table_name.trim(), rows_limit)
 }
 
 #[tauri::command]
@@ -1490,8 +1861,8 @@ pub async fn search_files(
         let path = entry.path();
         let file_matches = if is_extension_in(path, &spreadsheet_extensions()) {
             search_xlsx_file(path, &query, &query_lower, case_sensitive)
-        } else if has_extension(path, "docx") {
-            search_docx_file(path, &query, &query_lower, case_sensitive)
+        } else if is_extension_in(path, &document_extensions()) {
+            search_document_file(path, &query, &query_lower, case_sensitive)
         } else {
             search_plain_text_file(path, &query, &query_lower, case_sensitive)
         };
@@ -1542,7 +1913,29 @@ mod tests {
         assert!(contains_extension(&extensions, "xls"));
         assert!(contains_extension(&extensions, "ods"));
         assert!(contains_extension(&extensions, "docx"));
+        assert!(contains_extension(&extensions, "odt"));
+        assert!(contains_extension(&extensions, "rtf"));
         assert!(!contains_extension(&extensions, "png"));
+        assert!(!contains_extension(&extensions, "sqlite"));
+        assert!(!contains_extension(&extensions, "db"));
+    }
+
+    #[test]
+    fn document_filter_includes_odt_and_rtf() {
+        let extensions = extensions_from_filter("document");
+        assert!(contains_extension(&extensions, "docx"));
+        assert!(contains_extension(&extensions, "odt"));
+        assert!(contains_extension(&extensions, "rtf"));
+    }
+
+    #[test]
+    fn sqlite_extensions_in_supported_types() {
+        let types = supported_file_types();
+        let sqlite_type = types.iter().find(|t| t.id == "sqlite").unwrap();
+        assert!(sqlite_type.extensions.contains(&"sqlite".to_string()));
+        assert!(sqlite_type.extensions.contains(&"sqlite3".to_string()));
+        assert!(sqlite_type.extensions.contains(&"db".to_string()));
+        assert!(!sqlite_type.searchable);
     }
 
     #[test]

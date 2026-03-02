@@ -28,3 +28,4 @@ csv = "1"
 chardetng = "0.1"
 parquet = "53"
 duckdb = { version = "1", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }

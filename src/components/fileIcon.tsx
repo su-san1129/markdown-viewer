@@ -62,11 +62,15 @@ export function resolveFileIcon(path: string): FileIconMeta {
     return { Icon: FileSpreadsheet, color: "#6da3f0" };
   }
 
+  if (extension === "sqlite" || extension === "sqlite3" || extension === "db") {
+    return { Icon: FileSpreadsheet, color: "#5b9bd5" };
+  }
+
   if (imageExtensions.has(extension)) {
     return { Icon: FileImage, color: "#f0c36d" };
   }
 
-  if (extension === "pdf" || extension === "docx") {
+  if (extension === "pdf" || extension === "docx" || extension === "odt" || extension === "rtf") {
     return { Icon: FileType, color: "#f08b8b" };
   }
 

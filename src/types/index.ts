@@ -75,3 +75,15 @@ export interface DuckDbTableInfo {
   tableName: string;
   displayName: string;
 }
+
+export interface SqliteTableInfo {
+  tableName: string;
+}
+
+export interface SqliteTablePreviewData {
+  tableName: string;
+  columns: string[];
+  rows: string[][];
+  totalRows: number;
+  truncated: boolean;
+}

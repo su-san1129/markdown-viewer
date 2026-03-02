@@ -22,7 +22,7 @@ function DocxViewer(
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(`DOCXの読み込みに失敗しました: ${String(err)}`);
+        setError(`ドキュメントの読み込みに失敗しました: ${String(err)}`);
       })
       .finally(() => {
         if (cancelled) return;
@@ -40,7 +40,7 @@ function DocxViewer(
   );
 
   if (loading) {
-    return <p style={{ color: "var(--text-secondary)" }}>DOCXを読み込み中...</p>;
+    return <p style={{ color: "var(--text-secondary)" }}>ドキュメントを読み込み中...</p>;
   }
 
   if (error) {
@@ -61,7 +61,7 @@ function DocxViewer(
 export const docxViewerPlugin: ViewerPlugin = {
   id: "docx",
   label: "Document",
-  extensions: ["docx"],
+  extensions: ["docx", "odt", "rtf"],
   supportsFind: true,
   render({ filePath, contentRef }) {
     return <DocxViewer filePath={filePath} contentRef={contentRef} />;

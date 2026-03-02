@@ -197,9 +197,10 @@ const initialState: AppState = {
       extensions: ["xlsx", "xlsm", "xls", "ods"],
       searchable: true
     },
-    { id: "document", label: "Document", extensions: ["docx"], searchable: true },
+    { id: "document", label: "Document", extensions: ["docx", "odt", "rtf"], searchable: true },
     { id: "parquet", label: "Parquet", extensions: ["parquet"], searchable: false },
     { id: "duckdb", label: "DuckDB", extensions: ["duckdb", "ddb"], searchable: false },
+    { id: "sqlite", label: "SQLite", extensions: ["sqlite", "sqlite3", "db"], searchable: false },
     {
       id: "image",
       label: "Image",

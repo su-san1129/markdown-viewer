@@ -8,6 +8,7 @@ import { jsonViewerPlugin } from "./plugins/json";
 import { markdownViewerPlugin } from "./plugins/markdown";
 import { pdfViewerPlugin } from "./plugins/pdf";
 import { parquetViewerPlugin } from "./plugins/parquet";
+import { sqliteViewerPlugin } from "./plugins/sqlite";
 import { textViewerPlugin } from "./plugins/text";
 import { xlsxViewerPlugin } from "./plugins/xlsx";
 import { getFileExtension } from "./fileTypes";
@@ -33,6 +34,7 @@ registerViewer(xlsxViewerPlugin);
 registerViewer(docxViewerPlugin);
 registerViewer(parquetViewerPlugin);
 registerViewer(duckdbViewerPlugin);
+registerViewer(sqliteViewerPlugin);
 registerViewer(imageViewerPlugin);
 registerViewer(pdfViewerPlugin);
 

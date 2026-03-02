@@ -27,8 +27,9 @@ multiple file types from a folder tree with fast preview, search, and format-spe
   `.gitignore`, `.editorconfig` (line numbers + wrap toggle + syntax highlight + large-file partial
   render)
 - Spreadsheet: `.xlsx`, `.xlsm`, `.xls`, `.ods` (sheet tabs + table preview)
-- Document: `.docx` (paragraph text extraction preview)
+- Document: `.docx`, `.odt`, `.rtf` (paragraph text extraction preview)
 - DuckDB: `.duckdb`, `.ddb` (table list + preview)
+- SQLite: `.sqlite`, `.sqlite3`, `.db` (table list + preview)
 - Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.ico`, `.avif`, `.tif`, `.tiff`
 - PDF: `.pdf` (embedded `pdf.js` viewer with continuous vertical scroll and zoom)
 - Markdown export: `.md` / `.markdown` -> `.pdf` (A4, 25mm margin, via bundled `pandoc` +

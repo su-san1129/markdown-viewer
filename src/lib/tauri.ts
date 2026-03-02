@@ -10,6 +10,8 @@ import type {
   LaunchTarget,
   ParquetPreviewData,
   SearchFileResult,
+  SqliteTableInfo,
+  SqliteTablePreviewData,
   SupportedFileType,
   XlsxData
 } from "../types";
@@ -103,6 +105,22 @@ export async function readDuckDbTablePreview(
   return invoke<DuckDbTablePreviewData>("read_duckdb_table_preview", {
     path,
     schemaName,
+    tableName,
+    maxRows
+  });
+}
+
+export async function readSqliteTables(path: string): Promise<SqliteTableInfo[]> {
+  return invoke<SqliteTableInfo[]>("read_sqlite_tables", { path });
+}
+
+export async function readSqliteTablePreview(
+  path: string,
+  tableName: string,
+  maxRows: number
+): Promise<SqliteTablePreviewData> {
+  return invoke<SqliteTablePreviewData>("read_sqlite_table_preview", {
+    path,
     tableName,
     maxRows
   });

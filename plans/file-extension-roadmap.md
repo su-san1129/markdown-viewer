@@ -103,10 +103,10 @@
   - DoD: TIFF images resolve via image viewer path and appear as image type in UI metadata
   - Tests: extension list includes `.tif`/`.tiff` across frontend and backend lists
 
-- [ ] EXT-004 Add `.odt` document text extraction
+- [x] EXT-004 Add `.odt` document text extraction
   - Priority: P1
   - Phase: 2
-  - Owner: TBD
+  - Owner: Agent
   - Files:
     - `src-tauri/src/commands.rs`
     - `src/lib/tauri.ts`
@@ -115,20 +115,20 @@
   - DoD: ODT paragraph text is extracted and displayed in document viewer
   - Tests: fixture-based checks for paragraph, tab, line-break behavior
 
-- [ ] EXT-005 Add `.rtf` document text extraction
+- [x] EXT-005 Add `.rtf` document text extraction
   - Priority: P1
   - Phase: 2
-  - Owner: TBD
+  - Owner: Agent
   - Files:
     - parser implementation path in `src-tauri/src/commands.rs`
     - frontend bridge/types/plugins
   - DoD: text preview is readable with control words safely handled
   - Tests: fixture checks for escaped characters and mixed formatting control words
 
-- [ ] EXT-006 Add `.sqlite`/`.sqlite3`/`.db` table preview support
+- [x] EXT-006 Add `.sqlite`/`.sqlite3`/`.db` table preview support
   - Priority: P1
   - Phase: 2
-  - Owner: TBD
+  - Owner: Agent
   - Files:
     - new sqlite backend commands
     - frontend plugin + types + registry
@@ -227,3 +227,7 @@
     - EXT-001 `.jsonl`
     - EXT-002 `.xls`/`.ods`
     - EXT-003 `.tif`/`.tiff`
+  - Completed Phase 2 tasks:
+    - EXT-004 `.odt` (document text extraction via ZIP + quick-xml)
+    - EXT-005 `.rtf` (document text extraction via state-machine parser)
+    - EXT-006 `.sqlite`/`.sqlite3`/`.db` (table list + preview via rusqlite)
