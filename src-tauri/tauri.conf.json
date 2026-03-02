@@ -18,7 +18,15 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: asset: https://tile.openstreetmap.org; connect-src 'self' ipc: tauri: asset: https://tile.openstreetmap.org; font-src 'self' data:; worker-src 'self' blob:"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/su-san1129/view-bomber/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_PUBLIC_KEY"
     }
   },
   "bundle": {

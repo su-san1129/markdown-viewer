@@ -9,15 +9,40 @@
     "fs:default",
     {
       "identifier": "fs:allow-read",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-watch",
-      "allow": [{ "path": "**" }]
-    }
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    "updater:default"
   ]
 }

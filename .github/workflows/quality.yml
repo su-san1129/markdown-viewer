@@ -59,3 +59,13 @@ jobs:
       - name: Rust lint (clippy)
         working-directory: src-tauri
         run: cargo clippy -p view-bomber --all-targets --no-deps -- -D warnings
+
+      - name: Frontend dependency audit
+        run: npm i --package-lock-only --ignore-scripts && npm audit --audit-level=high || true
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Rust dependency audit
+        working-directory: src-tauri
+        run: cargo audit

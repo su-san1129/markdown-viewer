@@ -132,6 +132,13 @@ jobs:
           echo "Will upload canonical files:"
           cat /tmp/release-assets.txt
 
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd /tmp/release-upload
+          sha256sum * > checksums-sha256.txt
+          echo "/tmp/release-upload/checksums-sha256.txt" >> /tmp/release-assets.txt
+
       - name: Upload artifacts to release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

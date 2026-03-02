@@ -14,6 +14,7 @@ pub fn run() {
         .manage(GeoJsonTileStore::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             read_directory_tree,
             get_file_meta,
