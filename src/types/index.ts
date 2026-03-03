@@ -28,9 +28,51 @@ export interface LaunchTarget {
   selectedFilePath: string | null;
 }
 
+export interface XlsxCellStyle {
+  r: number;
+  c: number;
+  bg?: string;
+  fg?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  font_size?: number;
+  wrap_text?: boolean;
+  border_top?: string;
+  border_right?: string;
+  border_bottom?: string;
+  border_left?: string;
+  border_top_color?: string;
+  border_right_color?: string;
+  border_bottom_color?: string;
+  border_left_color?: string;
+}
+
+export interface XlsxColWidth {
+  min: number;
+  max: number;
+  width: number;
+}
+
+export interface XlsxMerge {
+  start_row: number;
+  start_col: number;
+  end_row: number;
+  end_col: number;
+}
+
+export interface XlsxRowHeight {
+  row: number;
+  height: number;
+}
+
 export interface XlsxSheetData {
   name: string;
   rows: string[][];
+  styles?: XlsxCellStyle[];
+  col_widths?: XlsxColWidth[];
+  merges?: XlsxMerge[];
+  row_heights?: XlsxRowHeight[];
 }
 
 export interface XlsxData {

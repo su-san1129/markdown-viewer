@@ -36,9 +36,74 @@ pub struct SupportedFileType {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct XlsxCellStyle {
+    pub r: u32,
+    pub c: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub bold: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub italic: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub underline: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f64>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub wrap_text: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_top: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_right: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_bottom: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_left: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_top_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_right_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_bottom_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_left_color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct XlsxColWidth {
+    pub min: u32,
+    pub max: u32,
+    pub width: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct XlsxMerge {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct XlsxRowHeight {
+    pub row: u32,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct XlsxSheetData {
     pub name: String,
     pub rows: Vec<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<XlsxCellStyle>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub col_widths: Vec<XlsxColWidth>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub merges: Vec<XlsxMerge>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub row_heights: Vec<XlsxRowHeight>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -694,6 +759,888 @@ fn row_has_visible_content(row: &[String]) -> bool {
             .unwrap_or(false)
 }
 
+/// Parse a cell reference like "A1" into (row, col) both 0-based.
+fn parse_cell_ref(s: &str) -> Option<(u32, u32)> {
+    let s = s.trim();
+    let mut col: u32 = 0;
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        col = col * 26 + (bytes[i].to_ascii_uppercase() - b'A') as u32 + 1;
+        i += 1;
+    }
+    if i == 0 || col == 0 {
+        return None;
+    }
+    col -= 1; // 0-based
+    let row: u32 = s[i..].parse().ok()?;
+    if row == 0 {
+        return None;
+    }
+    Some((row - 1, col))
+}
+
+/// Convert XLSX "AARRGGBB" (8-char) or "RRGGBB" (6-char) to "#RRGGBB".
+fn normalize_xlsx_color(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    match s.len() {
+        8 => {
+            let rgb = &s[2..]; // skip alpha
+            if rgb == "000000" || rgb == "FFFFFF" {
+                return None; // skip default black/white
+            }
+            Some(format!("#{}", rgb))
+        }
+        6 => {
+            if s == "000000" || s == "FFFFFF" {
+                return None;
+            }
+            Some(format!("#{}", s))
+        }
+        _ => None,
+    }
+}
+
+struct FontInfo {
+    color: Option<String>, // "#RRGGBB"
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    size: Option<f64>,
+}
+
+struct FillInfo {
+    fg_color: Option<String>, // "#RRGGBB"
+}
+
+struct BorderInfo {
+    top: Option<String>,
+    right: Option<String>,
+    bottom: Option<String>,
+    left: Option<String>,
+    top_color: Option<String>,
+    right_color: Option<String>,
+    bottom_color: Option<String>,
+    left_color: Option<String>,
+}
+
+struct CellXf {
+    font_id: usize,
+    fill_id: usize,
+    border_id: usize,
+    wrap_text: bool,
+}
+
+struct SheetFormatting {
+    styles: Vec<XlsxCellStyle>,
+    col_widths: Vec<XlsxColWidth>,
+    merges: Vec<XlsxMerge>,
+    row_heights: Vec<XlsxRowHeight>,
+}
+
+/// Extract formatting info (styles, col widths, merges) from an XLSX/XLSM file.
+fn extract_xlsx_formatting(
+    path: &Path,
+    sheet_names: &[String],
+) -> Result<Vec<SheetFormatting>, String> {
+    let file = fs::File::open(path).map_err(|e| format!("Failed to open xlsx: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read xlsx archive: {}", e))?;
+
+    // --- Parse xl/styles.xml ---
+    let (fonts, fills, borders, cell_xfs) = parse_styles_xml(&mut archive);
+
+    // --- Resolve sheet XML paths via workbook.xml + rels ---
+    let sheet_xml_paths = resolve_sheet_paths(&mut archive, sheet_names);
+
+    // --- Parse each sheet XML for col widths, merges, and cell style refs ---
+    let mut result = Vec::with_capacity(sheet_names.len());
+    for sheet_path in &sheet_xml_paths {
+        if let Some(path) = sheet_path {
+            let fmt =
+                parse_sheet_formatting(&mut archive, path, &fonts, &fills, &borders, &cell_xfs);
+            result.push(fmt);
+        } else {
+            result.push(SheetFormatting {
+                styles: vec![],
+                col_widths: vec![],
+                merges: vec![],
+                row_heights: vec![],
+            });
+        }
+    }
+
+    Ok(result)
+}
+
+fn parse_styles_xml(
+    archive: &mut ZipArchive<fs::File>,
+) -> (Vec<FontInfo>, Vec<FillInfo>, Vec<BorderInfo>, Vec<CellXf>) {
+    let mut fonts: Vec<FontInfo> = vec![];
+    let mut fills: Vec<FillInfo> = vec![];
+    let mut borders: Vec<BorderInfo> = vec![];
+    let mut cell_xfs: Vec<CellXf> = vec![];
+
+    let xml_data = match archive.by_name("xl/styles.xml") {
+        Ok(mut f) => {
+            let mut buf = String::new();
+            let _ = f.read_to_string(&mut buf);
+            buf
+        }
+        Err(_) => return (fonts, fills, borders, cell_xfs),
+    };
+
+    let mut reader = XmlReader::from_str(&xml_data);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    #[derive(PartialEq)]
+    enum Section {
+        None,
+        Fonts,
+        Fills,
+        Borders,
+        CellXfs,
+    }
+    let mut section = Section::None;
+    let mut in_font = false;
+    let mut current_font = FontInfo {
+        color: None,
+        bold: false,
+        italic: false,
+        underline: false,
+        size: None,
+    };
+    let mut in_fill = false;
+    let mut current_fill = FillInfo { fg_color: None };
+    let mut in_pattern_fill = false;
+
+    // Border parsing state
+    let mut in_border = false;
+    let mut current_border = BorderInfo {
+        top: None,
+        right: None,
+        bottom: None,
+        left: None,
+        top_color: None,
+        right_color: None,
+        bottom_color: None,
+        left_color: None,
+    };
+    #[derive(PartialEq)]
+    enum BorderSide {
+        None,
+        Top,
+        Right,
+        Bottom,
+        Left,
+    }
+    let mut border_side = BorderSide::None;
+
+    // CellXf: need to track whether xf is Start (has children) or Empty
+    let mut in_xf = false;
+    let mut current_xf = CellXf {
+        font_id: 0,
+        fill_id: 0,
+        border_id: 0,
+        wrap_text: false,
+    };
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = e.local_name();
+                let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match name {
+                    "fonts" => section = Section::Fonts,
+                    "fills" => section = Section::Fills,
+                    "borders" => section = Section::Borders,
+                    "cellXfs" => section = Section::CellXfs,
+                    "font" if section == Section::Fonts => {
+                        in_font = true;
+                        current_font = FontInfo {
+                            color: None,
+                            bold: false,
+                            italic: false,
+                            underline: false,
+                            size: None,
+                        };
+                    }
+                    "b" if in_font => {
+                        current_font.bold = true;
+                    }
+                    "i" if in_font => {
+                        current_font.italic = true;
+                    }
+                    "u" if in_font => {
+                        current_font.underline = true;
+                    }
+                    "color" if in_font => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                current_font.color = normalize_xlsx_color(&val);
+                            }
+                        }
+                    }
+                    "fill" if section == Section::Fills => {
+                        in_fill = true;
+                        current_fill = FillInfo { fg_color: None };
+                    }
+                    "patternFill" if in_fill => {
+                        in_pattern_fill = true;
+                    }
+                    "fgColor" if in_pattern_fill => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                current_fill.fg_color = normalize_xlsx_color(&val);
+                            }
+                        }
+                    }
+                    "border" if section == Section::Borders => {
+                        in_border = true;
+                        current_border = BorderInfo {
+                            top: None,
+                            right: None,
+                            bottom: None,
+                            left: None,
+                            top_color: None,
+                            right_color: None,
+                            bottom_color: None,
+                            left_color: None,
+                        };
+                    }
+                    "left" if in_border => {
+                        border_side = BorderSide::Left;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.left = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                    }
+                    "right" if in_border => {
+                        border_side = BorderSide::Right;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.right = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                    }
+                    "top" if in_border => {
+                        border_side = BorderSide::Top;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.top = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                    }
+                    "bottom" if in_border => {
+                        border_side = BorderSide::Bottom;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.bottom = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                    }
+                    "color" if in_border && border_side != BorderSide::None => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                if let Some(c) = normalize_xlsx_color(&val) {
+                                    match border_side {
+                                        BorderSide::Top => current_border.top_color = Some(c),
+                                        BorderSide::Right => current_border.right_color = Some(c),
+                                        BorderSide::Bottom => current_border.bottom_color = Some(c),
+                                        BorderSide::Left => current_border.left_color = Some(c),
+                                        BorderSide::None => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "xf" if section == Section::CellXfs => {
+                        in_xf = true;
+                        current_xf = CellXf {
+                            font_id: 0,
+                            fill_id: 0,
+                            border_id: 0,
+                            wrap_text: false,
+                        };
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"fontId" => {
+                                    current_xf.font_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"fillId" => {
+                                    current_xf.fill_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"borderId" => {
+                                    current_xf.border_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    "alignment" if in_xf => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"wrapText" {
+                                current_xf.wrap_text =
+                                    std::str::from_utf8(&attr.value).unwrap_or("") == "1";
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let local = e.local_name();
+                let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match name {
+                    "b" if in_font => {
+                        current_font.bold = true;
+                    }
+                    "i" if in_font => {
+                        current_font.italic = true;
+                    }
+                    "u" if in_font => {
+                        current_font.underline = true;
+                    }
+                    "sz" if in_font => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"val" {
+                                current_font.size =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").parse().ok();
+                            }
+                        }
+                    }
+                    "color" if in_font => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                current_font.color = normalize_xlsx_color(&val);
+                            }
+                        }
+                    }
+                    "fgColor" if in_pattern_fill => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                current_fill.fg_color = normalize_xlsx_color(&val);
+                            }
+                        }
+                    }
+                    "left" if in_border => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.left = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                        border_side = BorderSide::None;
+                    }
+                    "right" if in_border => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.right = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                        border_side = BorderSide::None;
+                    }
+                    "top" if in_border => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.top = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                        border_side = BorderSide::None;
+                    }
+                    "bottom" if in_border => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"style" {
+                                current_border.bottom = Some(
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+                                );
+                            }
+                        }
+                        border_side = BorderSide::None;
+                    }
+                    "color" if in_border && border_side != BorderSide::None => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"rgb" {
+                                let val =
+                                    std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                if let Some(c) = normalize_xlsx_color(&val) {
+                                    match border_side {
+                                        BorderSide::Top => current_border.top_color = Some(c),
+                                        BorderSide::Right => current_border.right_color = Some(c),
+                                        BorderSide::Bottom => current_border.bottom_color = Some(c),
+                                        BorderSide::Left => current_border.left_color = Some(c),
+                                        BorderSide::None => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "xf" if section == Section::CellXfs => {
+                        // Empty <xf/> - no alignment child
+                        let mut xf = CellXf {
+                            font_id: 0,
+                            fill_id: 0,
+                            border_id: 0,
+                            wrap_text: false,
+                        };
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"fontId" => {
+                                    xf.font_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"fillId" => {
+                                    xf.fill_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"borderId" => {
+                                    xf.border_id = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                _ => {}
+                            }
+                        }
+                        cell_xfs.push(xf);
+                    }
+                    "alignment" if in_xf => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"wrapText" {
+                                current_xf.wrap_text =
+                                    std::str::from_utf8(&attr.value).unwrap_or("") == "1";
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = e.local_name();
+                let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match name {
+                    "font" if in_font => {
+                        fonts.push(FontInfo {
+                            color: current_font.color.clone(),
+                            bold: current_font.bold,
+                            italic: current_font.italic,
+                            underline: current_font.underline,
+                            size: current_font.size,
+                        });
+                        in_font = false;
+                    }
+                    "fill" if in_fill => {
+                        fills.push(FillInfo {
+                            fg_color: current_fill.fg_color.clone(),
+                        });
+                        in_fill = false;
+                        in_pattern_fill = false;
+                    }
+                    "patternFill" => {
+                        in_pattern_fill = false;
+                    }
+                    "border" if in_border => {
+                        borders.push(BorderInfo {
+                            top: current_border.top.clone(),
+                            right: current_border.right.clone(),
+                            bottom: current_border.bottom.clone(),
+                            left: current_border.left.clone(),
+                            top_color: current_border.top_color.clone(),
+                            right_color: current_border.right_color.clone(),
+                            bottom_color: current_border.bottom_color.clone(),
+                            left_color: current_border.left_color.clone(),
+                        });
+                        in_border = false;
+                        border_side = BorderSide::None;
+                    }
+                    "left" | "right" | "top" | "bottom" if in_border => {
+                        border_side = BorderSide::None;
+                    }
+                    "xf" if in_xf => {
+                        cell_xfs.push(CellXf {
+                            font_id: current_xf.font_id,
+                            fill_id: current_xf.fill_id,
+                            border_id: current_xf.border_id,
+                            wrap_text: current_xf.wrap_text,
+                        });
+                        in_xf = false;
+                    }
+                    "fonts" => section = Section::None,
+                    "fills" => section = Section::None,
+                    "borders" => section = Section::None,
+                    "cellXfs" => section = Section::None,
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    (fonts, fills, borders, cell_xfs)
+}
+
+fn resolve_sheet_paths(
+    archive: &mut ZipArchive<fs::File>,
+    sheet_names: &[String],
+) -> Vec<Option<String>> {
+    // Read workbook.xml to get sheet name -> r:id mapping
+    let mut sheet_rid_map: Vec<(String, String)> = vec![];
+    if let Ok(mut f) = archive.by_name("xl/workbook.xml") {
+        let mut xml = String::new();
+        let _ = f.read_to_string(&mut xml);
+        let mut reader = XmlReader::from_str(&xml);
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                    let local = e.local_name();
+                    if std::str::from_utf8(local.as_ref()).unwrap_or("") == "sheet" {
+                        let mut name = String::new();
+                        let mut rid = String::new();
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" => {
+                                    name =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                b"r:id" => {
+                                    rid =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !name.is_empty() && !rid.is_empty() {
+                            sheet_rid_map.push((name, rid));
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
+
+    // Read workbook.xml.rels to get r:id -> file path mapping
+    let mut rid_to_path: HashMap<String, String> = HashMap::new();
+    if let Ok(mut f) = archive.by_name("xl/_rels/workbook.xml.rels") {
+        let mut xml = String::new();
+        let _ = f.read_to_string(&mut xml);
+        let mut reader = XmlReader::from_str(&xml);
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                    let local = e.local_name();
+                    if std::str::from_utf8(local.as_ref()).unwrap_or("") == "Relationship" {
+                        let mut id = String::new();
+                        let mut target = String::new();
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"Id" => {
+                                    id = std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                b"Target" => {
+                                    target =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !id.is_empty() && !target.is_empty() {
+                            // Target is relative to xl/, e.g. "worksheets/sheet1.xml"
+                            rid_to_path.insert(id, format!("xl/{}", target));
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
+
+    // Match sheet names to XML paths
+    sheet_names
+        .iter()
+        .map(|name| {
+            sheet_rid_map
+                .iter()
+                .find(|(n, _)| n == name)
+                .and_then(|(_, rid)| rid_to_path.get(rid).cloned())
+        })
+        .collect()
+}
+
+fn parse_sheet_formatting(
+    archive: &mut ZipArchive<fs::File>,
+    sheet_path: &str,
+    fonts: &[FontInfo],
+    fills: &[FillInfo],
+    borders: &[BorderInfo],
+    cell_xfs: &[CellXf],
+) -> SheetFormatting {
+    let xml_data = match archive.by_name(sheet_path) {
+        Ok(mut f) => {
+            let mut buf = String::new();
+            let _ = f.read_to_string(&mut buf);
+            buf
+        }
+        Err(_) => {
+            return SheetFormatting {
+                styles: vec![],
+                col_widths: vec![],
+                merges: vec![],
+                row_heights: vec![],
+            }
+        }
+    };
+
+    let mut styles: Vec<XlsxCellStyle> = vec![];
+    let mut col_widths: Vec<XlsxColWidth> = vec![];
+    let mut merges: Vec<XlsxMerge> = vec![];
+    let mut row_heights: Vec<XlsxRowHeight> = vec![];
+
+    let mut reader = XmlReader::from_str(&xml_data);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let local = e.local_name();
+                let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                match name {
+                    "col" => {
+                        let mut min: u32 = 0;
+                        let mut max: u32 = 0;
+                        let mut width: f64 = 0.0;
+                        let mut has_custom = false;
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"min" => {
+                                    min = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"max" => {
+                                    max = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"width" => {
+                                    width = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0.0);
+                                    has_custom = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if has_custom && min > 0 && max > 0 {
+                            col_widths.push(XlsxColWidth { min, max, width });
+                        }
+                    }
+                    "row" => {
+                        let mut row_idx: u32 = 0;
+                        let mut ht: f64 = 0.0;
+                        let mut custom_height = false;
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"r" => {
+                                    row_idx = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                                b"ht" => {
+                                    ht = std::str::from_utf8(&attr.value)
+                                        .unwrap_or("0")
+                                        .parse()
+                                        .unwrap_or(0.0);
+                                }
+                                b"customHeight" => {
+                                    custom_height =
+                                        std::str::from_utf8(&attr.value).unwrap_or("") == "1";
+                                }
+                                _ => {}
+                            }
+                        }
+                        if ht > 0.0 && row_idx > 0 && (custom_height || ht != 15.0) {
+                            row_heights.push(XlsxRowHeight {
+                                row: row_idx - 1, // 0-based
+                                height: ht,
+                            });
+                        }
+                    }
+                    "mergeCell" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"ref" {
+                                let ref_str = std::str::from_utf8(&attr.value).unwrap_or("");
+                                if let Some((start, end)) = ref_str.split_once(':') {
+                                    if let (Some((sr, sc)), Some((er, ec))) =
+                                        (parse_cell_ref(start), parse_cell_ref(end))
+                                    {
+                                        merges.push(XlsxMerge {
+                                            start_row: sr,
+                                            start_col: sc,
+                                            end_row: er,
+                                            end_col: ec,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "c" => {
+                        // Cell element: r="A1" s="3"
+                        let mut cell_ref = String::new();
+                        let mut style_idx: Option<usize> = None;
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"r" => {
+                                    cell_ref =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").to_string();
+                                }
+                                b"s" => {
+                                    style_idx =
+                                        std::str::from_utf8(&attr.value).unwrap_or("").parse().ok();
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let (Some((row, col)), Some(si)) = (parse_cell_ref(&cell_ref), style_idx)
+                        {
+                            if let Some(xf) = cell_xfs.get(si) {
+                                let font = fonts.get(xf.font_id);
+                                let fill = fills.get(xf.fill_id);
+                                let border = borders.get(xf.border_id);
+                                // Skip fill index 0 (none) and 1 (gray125 pattern)
+                                let bg = if xf.fill_id >= 2 {
+                                    fill.and_then(|f| f.fg_color.clone())
+                                } else {
+                                    None
+                                };
+                                let fg = font.and_then(|f| f.color.clone());
+                                let bold = font.map(|f| f.bold).unwrap_or(false);
+                                let italic = font.map(|f| f.italic).unwrap_or(false);
+                                let underline = font.map(|f| f.underline).unwrap_or(false);
+                                let font_size = font.and_then(|f| f.size);
+                                let wrap_text = xf.wrap_text;
+
+                                let border_top = border.and_then(|b| b.top.clone());
+                                let border_right = border.and_then(|b| b.right.clone());
+                                let border_bottom = border.and_then(|b| b.bottom.clone());
+                                let border_left = border.and_then(|b| b.left.clone());
+                                let border_top_color = border.and_then(|b| b.top_color.clone());
+                                let border_right_color = border.and_then(|b| b.right_color.clone());
+                                let border_bottom_color =
+                                    border.and_then(|b| b.bottom_color.clone());
+                                let border_left_color = border.and_then(|b| b.left_color.clone());
+
+                                let has_style = bg.is_some()
+                                    || fg.is_some()
+                                    || bold
+                                    || italic
+                                    || underline
+                                    || font_size.is_some()
+                                    || wrap_text
+                                    || border_top.is_some()
+                                    || border_right.is_some()
+                                    || border_bottom.is_some()
+                                    || border_left.is_some();
+
+                                if has_style {
+                                    styles.push(XlsxCellStyle {
+                                        r: row,
+                                        c: col,
+                                        bg,
+                                        fg,
+                                        bold,
+                                        italic,
+                                        underline,
+                                        font_size,
+                                        wrap_text,
+                                        border_top,
+                                        border_right,
+                                        border_bottom,
+                                        border_left,
+                                        border_top_color,
+                                        border_right_color,
+                                        border_bottom_color,
+                                        border_left_color,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    SheetFormatting {
+        styles,
+        col_widths,
+        merges,
+        row_heights,
+    }
+}
+
 fn parse_xlsx(path: &Path) -> Result<XlsxData, String> {
     let mut workbook =
         open_workbook_auto(path).map_err(|e| format!("Failed to open xlsx workbook: {}", e))?;
@@ -722,7 +1669,30 @@ fn parse_xlsx(path: &Path) -> Result<XlsxData, String> {
         sheets.push(XlsxSheetData {
             name: name.clone(),
             rows,
+            styles: vec![],
+            col_widths: vec![],
+            merges: vec![],
+            row_heights: vec![],
         });
+    }
+
+    // Extract formatting for .xlsx/.xlsm only
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext == "xlsx" || ext == "xlsm" {
+        if let Ok(formatting) = extract_xlsx_formatting(path, &sheet_names) {
+            for (i, fmt) in formatting.into_iter().enumerate() {
+                if let Some(sheet) = sheets.get_mut(i) {
+                    sheet.styles = fmt.styles;
+                    sheet.col_widths = fmt.col_widths;
+                    sheet.merges = fmt.merges;
+                    sheet.row_heights = fmt.row_heights;
+                }
+            }
+        }
     }
 
     Ok(XlsxData { sheets })

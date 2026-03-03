@@ -43,6 +43,14 @@
   --welcome-title: #e0e0e0;
   --welcome-heading: #c0c0c0;
 
+  /* XLSX Spreadsheet */
+  --xlsx-grid: rgba(255, 255, 255, 0.08);
+  --xlsx-header-bg: #2d2d2d;
+  --xlsx-header-text: #b0b0b0;
+  --xlsx-selected-bg: rgba(33, 133, 208, 0.15);
+  --xlsx-selected-border: #2185d0;
+  --xlsx-formula-bg: #252526;
+
   /* ===== Design Tokens ===== */
   /* Spacing (4px grid) */
   --sp-1: 4px;
@@ -123,6 +131,14 @@
   /* Welcome */
   --welcome-title: #333333;
   --welcome-heading: #555555;
+
+  /* XLSX Spreadsheet */
+  --xlsx-grid: rgba(0, 0, 0, 0.12);
+  --xlsx-header-bg: #f0f0f0;
+  --xlsx-header-text: #555555;
+  --xlsx-selected-bg: rgba(33, 133, 208, 0.1);
+  --xlsx-selected-border: #2185d0;
+  --xlsx-formula-bg: #f8f8f8;
 
   color-scheme: light;
 }
@@ -691,14 +707,194 @@ mark.find-highlight-current {
   background-color: var(--md-table-hover);
 }
 
-/* ===== XLSX viewer ===== */
-.xlsx-tabs {
+/* ===== XLSX spreadsheet viewer ===== */
+.xlsx-viewer {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+.xlsx-formula-bar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  border-bottom: 1px solid var(--xlsx-grid);
+  background-color: var(--xlsx-formula-bg);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.xlsx-formula-addr {
+  width: 64px;
+  padding: 0 8px;
+  border-right: 1px solid var(--xlsx-grid);
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.xlsx-formula-content {
+  flex: 1;
+  padding: 0 8px;
+  color: var(--text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.xlsx-grid-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.xlsx-grid {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+}
+
+.xlsx-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: var(--xlsx-header-bg);
+  color: var(--xlsx-header-text);
+  font-weight: 500;
+  text-align: center;
+  padding: 3px 8px;
+  border-right: 1px solid var(--xlsx-grid);
+  border-bottom: 1px solid var(--xlsx-grid);
+  white-space: nowrap;
+  user-select: none;
+  min-width: 64px;
+}
+
+.xlsx-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3 !important;
+  min-width: 40px;
+  width: 40px;
+}
+
+.xlsx-row-header {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--xlsx-header-bg);
+  color: var(--xlsx-header-text);
+  font-weight: 500;
+  text-align: center;
+  padding: 2px 6px;
+  border-right: 1px solid var(--xlsx-grid);
+  border-bottom: 1px solid var(--xlsx-grid);
+  white-space: nowrap;
+  user-select: none;
+  min-width: 40px;
+  width: 40px;
+}
+
+.xlsx-grid td {
+  padding: 2px 6px;
+  border-right: 1px solid var(--xlsx-grid);
+  border-bottom: 1px solid var(--xlsx-grid);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+  min-height: 22px;
+  cursor: cell;
+}
+
+.xlsx-grid td:hover {
+  background-color: var(--xlsx-selected-bg);
+}
+
+.xlsx-cell-selected {
+  background-color: var(--xlsx-selected-bg) !important;
+  outline: 2px solid var(--xlsx-selected-border);
+  outline-offset: -2px;
+}
+
+.xlsx-cell-numeric {
+  text-align: right;
+}
+
+.xlsx-col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+}
+
+.xlsx-col-resize-handle:hover {
+  background-color: var(--xlsx-selected-border);
+}
+
+.xlsx-row-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  cursor: row-resize;
+}
+
+.xlsx-row-resize-handle:hover {
+  background-color: var(--xlsx-selected-border);
+}
+
+.xlsx-meta {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--xlsx-grid);
+  color: var(--text-secondary);
+  font-size: 11px;
+  user-select: none;
+}
+
+.xlsx-sheet-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid var(--xlsx-grid);
+  background-color: var(--xlsx-header-bg);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.xlsx-sheet-tab {
+  height: 26px;
+  padding: 0 14px;
+  border: none;
+  border-right: 1px solid var(--xlsx-grid);
+  background: transparent;
+  color: var(--xlsx-header-text);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.xlsx-sheet-tab:hover {
+  background-color: var(--bg-hover);
+}
+
+.xlsx-sheet-tab.is-active {
+  color: var(--text-primary);
+  background-color: var(--bg-main);
+  font-weight: 600;
+}
+
+/* ===== XLSX tabs (used by DuckDB/SQLite) ===== */
 .xlsx-tab {
   height: 26px;
   padding: 0 10px;
