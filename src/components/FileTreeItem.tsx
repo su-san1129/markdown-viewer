@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import type { FileEntry } from "../types";
 import { useActiveWorkspace, useAppDispatch, useAppState } from "../context/AppContext";
 import { readFileContent } from "../lib/tauri";
 import { requiresRawTextContent } from "../viewers/fileTypes";
 import { resolveFileIcon } from "./fileIcon";
 import { FileTree } from "./FileTree";
+
+let dragIconPath: string | null = null;
+async function getDragIconPath(): Promise<string> {
+  if (!dragIconPath) {
+    const { resolveResource } = await import("@tauri-apps/api/path");
+    dragIconPath = await resolveResource("icons/32x32.png");
+  }
+  return dragIconPath;
+}
 
 interface FileTreeItemProps {
   entry: FileEntry;
@@ -126,6 +136,16 @@ export function FileTreeItem({
             ? "var(--bg-hover)"
             : "transparent",
           color: "var(--text-primary)"
+        }}
+        draggable
+        onDragStart={async (e) => {
+          e.preventDefault();
+          try {
+            const icon = await getDragIconPath();
+            await startDrag({ item: [entry.path], icon });
+          } catch (err) {
+            console.error("Drag failed:", err);
+          }
         }}
         onClick={handleClick}
         onContextMenu={(event) => {

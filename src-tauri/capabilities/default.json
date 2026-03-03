@@ -43,6 +43,7 @@
         { "path": "$TEMP/**" }
       ]
     },
-    "updater:default"
+    "updater:default",
+    "drag:default"
   ]
 }

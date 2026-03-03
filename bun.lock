@@ -5,6 +5,7 @@
     "": {
       "name": "view-bomber",
       "dependencies": {
+        "@crabnebula/tauri-plugin-drag": "^2.1.0",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2.6.0",
         "@tauri-apps/plugin-fs": "^2.4.5",
@@ -92,6 +93,8 @@
     "@chevrotain/types": ["@chevrotain/types@11.1.2", "", {}, "sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw=="],
 
     "@chevrotain/utils": ["@chevrotain/utils@11.1.2", "", {}, "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA=="],
+
+    "@crabnebula/tauri-plugin-drag": ["@crabnebula/tauri-plugin-drag@2.1.0", "", { "dependencies": { "@tauri-apps/api": "^2.0.0" } }, "sha512-LnUXAZwQt1cdMoGDLJ6ogW9wFCYServCZXlGadS7CA+CZ9eXS7L+Q7QyQW6g/zGw9YI2MwKFqf1aSNBGyWw+OA=="],
 
     "@dprint/darwin-arm64": ["@dprint/darwin-arm64@0.52.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-HHpmHCeFw1V9qUU0pJrz7LihrMgQJ5DOejfI3GRCJOd2ue3Api3/ZrzNSIqUbnx/j0RT5c7zxZR5aTE0RHwRFQ=="],
 
