@@ -5,7 +5,9 @@
       "Bash(wc -l /Users/takahirosuzuki/workspace/view-bomber/plans/*.md)",
       "Bash(grep -i \"item\\\\|support\" /Users/takahirosuzuki/workspace/view-bomber/plans/*.md)",
       "Bash(cargo test)",
-      "Bash(bun run check)"
+      "Bash(bun run check)",
+      "Bash(gh api repos/crabnebula-dev/drag-rs/contents/crates/tauri-plugin-drag/src/commands.rs --jq '.content' 2>&1 | base64 -d)",
+      "Bash(gh api repos/crabnebula-dev/drag-rs/contents/crates/tauri-plugin-drag/src/lib.rs --jq '.content' 2>&1 | base64 -d)"
     ]
   }
 }

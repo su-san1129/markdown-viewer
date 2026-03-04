@@ -4465,21 +4465,22 @@ pub async fn search_files_stream(
     let search_id_clone = search_id.clone();
 
     std::thread::spawn(move || {
-        let emit_done = |total_files: usize, total_matches: usize, cancelled: bool, limit_reached: bool| {
-            let _ = app.emit(
-                "search_stream_done",
-                SearchStreamDonePayload {
-                    search_id: search_id_clone.clone(),
-                    total_files,
-                    total_matches,
-                    cancelled,
-                    limit_reached,
-                },
-            );
-            if let Ok(mut flags) = store.flags.lock() {
-                flags.remove(&search_id_clone);
-            }
-        };
+        let emit_done =
+            |total_files: usize, total_matches: usize, cancelled: bool, limit_reached: bool| {
+                let _ = app.emit(
+                    "search_stream_done",
+                    SearchStreamDonePayload {
+                        search_id: search_id_clone.clone(),
+                        total_files,
+                        total_matches,
+                        cancelled,
+                        limit_reached,
+                    },
+                );
+                if let Ok(mut flags) = store.flags.lock() {
+                    flags.remove(&search_id_clone);
+                }
+            };
 
         if query.is_empty() {
             emit_done(0, 0, false, false);
@@ -4562,7 +4563,6 @@ pub async fn search_files_stream(
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

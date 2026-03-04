@@ -8,6 +8,12 @@ import { fileURLToPath } from "node:url";
 const strict = process.argv.includes("--strict");
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "..");
+
+// Manual license overrides for packages missing license metadata.
+// Key format: "name@version", value: SPDX license identifier.
+const LICENSE_OVERRIDES = {
+  "@crabnebula/tauri-plugin-drag@2.1.0": "MIT"
+};
 const outputPath = join(rootDir, "THIRD_PARTY_NOTICES.md");
 const apacheNoticeOutputPath = join(rootDir, "APACHE_NOTICES.md");
 
@@ -462,6 +468,15 @@ const npmPackages = sortPackages(collectNodePackages());
 const cargoResult = collectCargoPackages();
 const cargoPackages = sortPackages(cargoResult.packages);
 const allPackages = [...npmPackages, ...cargoPackages];
+
+// Apply manual license overrides
+for (const pkg of allPackages) {
+  const key = `${pkg.name}@${pkg.version}`;
+  if (LICENSE_OVERRIDES[key]) {
+    pkg.license = LICENSE_OVERRIDES[key];
+  }
+}
+
 const unknownPackages = allPackages.filter(
   (pkg) => pkg.license === "UNKNOWN" || pkg.license.startsWith("UNKNOWN (")
 );

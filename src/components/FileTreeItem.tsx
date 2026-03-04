@@ -9,6 +9,19 @@ import { resolveFileIcon } from "./fileIcon";
 import { FileTree } from "./FileTree";
 
 let dragIconPath: string | null = null;
+
+// Pre-resolve the icon path eagerly to avoid async delay on first drag
+(async () => {
+  try {
+    const { resolveResource } = await import("@tauri-apps/api/path");
+    dragIconPath = await resolveResource("icons/32x32.png");
+    console.log("[drag] icon path pre-resolved:", dragIconPath);
+  } catch (err) {
+    console.warn("[drag] icon pre-resolve failed:", err);
+    dragIconPath = "";
+  }
+})();
+
 async function getDragIconPath(): Promise<string> {
   if (!dragIconPath) {
     const { resolveResource } = await import("@tauri-apps/api/path");
@@ -140,11 +153,14 @@ export function FileTreeItem({
         draggable
         onDragStart={async (e) => {
           e.preventDefault();
+          console.log("[drag] onDragStart fired, path:", entry.path);
           try {
             const icon = await getDragIconPath();
+            console.log("[drag] icon:", icon, "item:", entry.path);
             await startDrag({ item: [entry.path], icon });
+            console.log("[drag] startDrag completed");
           } catch (err) {
-            console.error("Drag failed:", err);
+            console.error("[drag] startDrag failed:", err);
           }
         }}
         onClick={handleClick}
