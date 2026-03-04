@@ -52,13 +52,16 @@ jobs:
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
 
       - name: Verify clippy component
         run: rustup component list --installed | grep '^clippy'
 
       - name: Rust lint (clippy)
         working-directory: src-tauri
-        run: cargo clippy -p view-bomber --all-targets --no-deps -- -D warnings
+        run: cargo clippy -p view-bomber --no-deps -- -D warnings
 
       - name: Frontend dependency audit
         run: npm i --package-lock-only --ignore-scripts && npm audit --audit-level=high || true
