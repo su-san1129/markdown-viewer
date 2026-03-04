@@ -1,12 +1,17 @@
 import { useEffect, useRef } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useActiveWorkspace, useAppDispatch, useAppState } from "../context/AppContext";
-import { searchFiles } from "./tauri";
+import { cancelSearch, searchFilesStream } from "./tauri";
+import type { SearchStreamDoneData, SearchStreamResultData } from "../types";
 
 export function useSearch() {
   const { activeWorkspaceId } = useAppState();
   const activeWorkspace = useActiveWorkspace();
   const dispatch = useAppDispatch();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeSearchIdRef = useRef<string | null>(null);
+  const unlistenResultRef = useRef<UnlistenFn | null>(null);
+  const unlistenDoneRef = useRef<UnlistenFn | null>(null);
   const rootPath = activeWorkspace?.path ?? null;
   const searchQuery = activeWorkspace?.searchQuery ?? "";
   const caseSensitive = activeWorkspace?.caseSensitive ?? false;
@@ -18,6 +23,11 @@ export function useSearch() {
     }
 
     if (!activeWorkspaceId || !rootPath || !searchQuery.trim()) {
+      // Cancel any active search and clear results
+      if (activeSearchIdRef.current) {
+        cancelSearch(activeSearchIdRef.current).catch(() => {});
+        activeSearchIdRef.current = null;
+      }
       if (activeWorkspaceId) {
         dispatch({
           type: "SET_WORKSPACE_SEARCH_RESULTS",
@@ -33,21 +43,76 @@ export function useSearch() {
     });
 
     timerRef.current = setTimeout(async () => {
+      // Cancel previous search
+      if (activeSearchIdRef.current) {
+        cancelSearch(activeSearchIdRef.current).catch(() => {});
+      }
+      // Clean up previous listeners
+      if (unlistenResultRef.current) {
+        unlistenResultRef.current();
+        unlistenResultRef.current = null;
+      }
+      if (unlistenDoneRef.current) {
+        unlistenDoneRef.current();
+        unlistenDoneRef.current = null;
+      }
+
+      const searchId = crypto.randomUUID();
+      activeSearchIdRef.current = searchId;
+
+      // Clear previous results
+      dispatch({
+        type: "SET_WORKSPACE_SEARCH_RESULTS",
+        payload: { workspaceId: activeWorkspaceId, results: [] }
+      });
+      dispatch({
+        type: "SET_WORKSPACE_SEARCH_LOADING",
+        payload: { workspaceId: activeWorkspaceId, loading: true }
+      });
+
+      // Set up event listeners
+      unlistenResultRef.current = await listen<SearchStreamResultData>(
+        "search_stream_result",
+        (event) => {
+          if (event.payload.searchId !== activeSearchIdRef.current) return;
+          dispatch({
+            type: "APPEND_WORKSPACE_SEARCH_RESULT",
+            payload: {
+              workspaceId: activeWorkspaceId,
+              result: event.payload.result
+            }
+          });
+        }
+      );
+
+      unlistenDoneRef.current = await listen<SearchStreamDoneData>(
+        "search_stream_done",
+        (event) => {
+          if (event.payload.searchId !== activeSearchIdRef.current) return;
+          dispatch({
+            type: "SET_WORKSPACE_SEARCH_LOADING",
+            payload: {
+              workspaceId: activeWorkspaceId,
+              loading: false,
+              limitReached: event.payload.limitReached
+            }
+          });
+        }
+      );
+
+      // Start the streaming search
       try {
-        const results = await searchFiles(
+        await searchFilesStream(
           rootPath,
           searchQuery,
           caseSensitive,
-          searchFileType
+          searchFileType,
+          searchId
         );
-        dispatch({
-          type: "SET_WORKSPACE_SEARCH_RESULTS",
-          payload: { workspaceId: activeWorkspaceId, results }
-        });
       } catch {
         dispatch({
-          type: "SET_WORKSPACE_SEARCH_RESULTS",
-          payload: { workspaceId: activeWorkspaceId, results: [] }
+          type: "SET_WORKSPACE_SEARCH_LOADING",
+          payload: { workspaceId: activeWorkspaceId, loading: false }
         });
       }
     }, 300);
@@ -65,4 +130,22 @@ export function useSearch() {
     searchFileType,
     dispatch
   ]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (activeSearchIdRef.current) {
+        cancelSearch(activeSearchIdRef.current).catch(() => {});
+        activeSearchIdRef.current = null;
+      }
+      if (unlistenResultRef.current) {
+        unlistenResultRef.current();
+        unlistenResultRef.current = null;
+      }
+      if (unlistenDoneRef.current) {
+        unlistenDoneRef.current();
+        unlistenDoneRef.current = null;
+      }
+    };
+  }, []);
 }

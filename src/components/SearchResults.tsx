@@ -174,23 +174,13 @@ export function SearchResults() {
     return null;
   }
 
-  const { searchResults, searchLoading, searchQuery } = activeWorkspace;
+  const { searchResults, searchLoading, searchLimitReached, searchQuery } = activeWorkspace;
 
-  if (searchLoading) {
-    return (
-      <div
-        style={{
-          padding: "var(--sp-2) var(--sp-5)",
-          fontSize: "var(--font-ui)",
-          color: "var(--text-secondary)"
-        }}
-      >
-        検索中...
-      </div>
-    );
+  if (!searchQuery) {
+    return null;
   }
 
-  if (searchQuery && searchResults.length === 0) {
+  if (!searchLoading && searchResults.length === 0) {
     return (
       <div
         style={{
@@ -206,6 +196,20 @@ export function SearchResults() {
 
   const totalMatches = searchResults.reduce((sum, r) => sum + r.matches.length, 0);
 
+  if (searchLoading && searchResults.length === 0) {
+    return (
+      <div
+        style={{
+          padding: "var(--sp-2) var(--sp-5)",
+          fontSize: "var(--font-ui)",
+          color: "var(--text-secondary)"
+        }}
+      >
+        検索中...
+      </div>
+    );
+  }
+
   return (
     <div>
       <div
@@ -220,6 +224,8 @@ export function SearchResults() {
         }}
       >
         {searchResults.length}件のファイル、{totalMatches}件の一致
+        {searchLimitReached && "（上限に達しました）"}
+        {searchLoading && " (検索中...)"}
       </div>
       {searchResults.map((result) => <SearchFileGroup key={result.file_path} result={result} />)}
     </div>

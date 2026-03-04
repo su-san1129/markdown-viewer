@@ -33,6 +33,7 @@ export interface WorkspaceSession {
   searchQuery: string;
   searchResults: SearchFileResult[];
   searchLoading: boolean;
+  searchLimitReached: boolean;
   caseSensitive: boolean;
   searchFileType: string;
 }
@@ -68,11 +69,18 @@ export type AppAction =
     type: "SET_WORKSPACE_SEARCH_RESULTS";
     payload: { workspaceId: string; results: SearchFileResult[]; };
   }
-  | { type: "SET_WORKSPACE_SEARCH_LOADING"; payload: { workspaceId: string; loading: boolean; }; }
+  | {
+    type: "SET_WORKSPACE_SEARCH_LOADING";
+    payload: { workspaceId: string; loading: boolean; limitReached?: boolean; };
+  }
   | { type: "TOGGLE_WORKSPACE_CASE_SENSITIVE"; payload: { workspaceId: string; }; }
   | { type: "SET_WORKSPACE_SEARCH_FILE_TYPE"; payload: { workspaceId: string; fileType: string; }; }
   | { type: "SET_SUPPORTED_FILE_TYPES"; payload: SupportedFileType[]; }
-  | { type: "CLEAR_WORKSPACE_SEARCH"; payload: { workspaceId: string; }; };
+  | { type: "CLEAR_WORKSPACE_SEARCH"; payload: { workspaceId: string; }; }
+  | {
+    type: "APPEND_WORKSPACE_SEARCH_RESULT";
+    payload: { workspaceId: string; result: SearchFileResult; };
+  };
 
 interface StoreHydration {
   activeWorkspaceId: string | null;
@@ -106,6 +114,7 @@ function createWorkspaceSession(
     searchQuery: seed?.searchQuery ?? "",
     searchResults: [],
     searchLoading: false,
+    searchLimitReached: false,
     caseSensitive: seed?.caseSensitive ?? false,
     searchFileType: seed?.searchFileType ?? "all"
   };
@@ -126,6 +135,7 @@ function evictWorkspaceMemory(workspace: WorkspaceSession): WorkspaceSession {
     fileIsUtf8: null,
     searchResults: [],
     searchLoading: false,
+    searchLimitReached: false,
     loading: false,
     error: null
   };
@@ -321,7 +331,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_WORKSPACE_SEARCH_LOADING":
       return updateWorkspace(action.payload.workspaceId, (workspace) => ({
         ...workspace,
-        searchLoading: action.payload.loading
+        searchLoading: action.payload.loading,
+        ...(action.payload.limitReached !== undefined
+          && { searchLimitReached: action.payload.limitReached })
       }));
     case "TOGGLE_WORKSPACE_CASE_SENSITIVE":
       return updateWorkspace(action.payload.workspaceId, (workspace) => ({
@@ -340,7 +352,13 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...workspace,
         searchQuery: "",
         searchResults: [],
-        searchLoading: false
+        searchLoading: false,
+        searchLimitReached: false
+      }));
+    case "APPEND_WORKSPACE_SEARCH_RESULT":
+      return updateWorkspace(action.payload.workspaceId, (workspace) => ({
+        ...workspace,
+        searchResults: [...workspace.searchResults, action.payload.result]
       }));
     default:
       return state;

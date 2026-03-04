@@ -13,8 +13,8 @@ use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -233,6 +233,11 @@ struct GeoJsonPrepareProgressPayload {
 #[derive(Default)]
 pub struct GeoJsonTileStore {
     sessions: Mutex<HashMap<String, GeoJsonTileSession>>,
+}
+
+#[derive(Default, Clone)]
+pub struct SearchCancelStore {
+    flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -4409,68 +4414,155 @@ pub struct SearchFileResult {
     pub matches: Vec<SearchMatch>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchStreamPayload {
+    search_id: String,
+    result: SearchFileResult,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchStreamDonePayload {
+    search_id: String,
+    total_files: usize,
+    total_matches: usize,
+    cancelled: bool,
+    limit_reached: bool,
+}
+
+const MAX_SEARCH_MATCHES: usize = 100;
+
 #[tauri::command]
-pub async fn search_files(
+pub async fn cancel_search(
+    search_id: String,
+    state: tauri::State<'_, SearchCancelStore>,
+) -> Result<(), String> {
+    let flags = state.flags.lock().map_err(|e| e.to_string())?;
+    if let Some(flag) = flags.get(&search_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn search_files_stream(
+    app: AppHandle,
     root_path: String,
     query: String,
     case_sensitive: bool,
     file_type_filter: String,
-) -> Result<Vec<SearchFileResult>, String> {
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let root = Path::new(&root_path);
-    if !root.is_dir() {
-        return Err(format!("Not a directory: {}", root_path));
-    }
-
-    let query_lower = if case_sensitive {
-        String::new()
-    } else {
-        query.to_lowercase()
-    };
-    let extensions = extensions_from_filter(&file_type_filter);
-    if extensions.is_empty() {
-        return Ok(Vec::new());
-    }
-    let include_text_special = include_text_special_for_filter(&file_type_filter);
-
-    let mut results: Vec<SearchFileResult> = Vec::new();
-
-    for entry in WalkDir::new(root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| !is_hidden_path_except_text_special(e.path()))
-        .filter(|e| {
-            e.file_type().is_file()
-                && matches_search_target(e.path(), &extensions, include_text_special)
-        })
+    search_id: String,
+    state: tauri::State<'_, SearchCancelStore>,
+) -> Result<(), String> {
+    let cancel_flag = Arc::new(AtomicBool::new(false));
     {
-        let path = entry.path();
-        let file_matches = if is_extension_in(path, &spreadsheet_extensions()) {
-            search_xlsx_file(path, &query, &query_lower, case_sensitive)
-        } else if is_extension_in(path, &document_extensions()) {
-            search_document_file(path, &query, &query_lower, case_sensitive)
-        } else {
-            search_plain_text_file(path, &query, &query_lower, case_sensitive)
+        let mut flags = state.flags.lock().map_err(|e| e.to_string())?;
+        flags.insert(search_id.clone(), cancel_flag.clone());
+    }
+
+    let store = state.inner().clone();
+    let search_id_clone = search_id.clone();
+
+    std::thread::spawn(move || {
+        let emit_done = |total_files: usize, total_matches: usize, cancelled: bool, limit_reached: bool| {
+            let _ = app.emit(
+                "search_stream_done",
+                SearchStreamDonePayload {
+                    search_id: search_id_clone.clone(),
+                    total_files,
+                    total_matches,
+                    cancelled,
+                    limit_reached,
+                },
+            );
+            if let Ok(mut flags) = store.flags.lock() {
+                flags.remove(&search_id_clone);
+            }
         };
 
-        if !file_matches.is_empty() {
-            let file_name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            results.push(SearchFileResult {
-                file_path: path.to_string_lossy().to_string(),
-                file_name,
-                matches: file_matches,
-            });
+        if query.is_empty() {
+            emit_done(0, 0, false, false);
+            return;
         }
-    }
 
-    Ok(results)
+        let root = Path::new(&root_path);
+        if !root.is_dir() {
+            emit_done(0, 0, false, false);
+            return;
+        }
+
+        let query_lower = if case_sensitive {
+            String::new()
+        } else {
+            query.to_lowercase()
+        };
+        let extensions = extensions_from_filter(&file_type_filter);
+        if extensions.is_empty() {
+            emit_done(0, 0, false, false);
+            return;
+        }
+        let include_text_special = include_text_special_for_filter(&file_type_filter);
+
+        let mut total_files: usize = 0;
+        let mut total_matches: usize = 0;
+
+        for entry in WalkDir::new(root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| !is_hidden_path_except_text_special(e.path()))
+            .filter(|e| {
+                e.file_type().is_file()
+                    && matches_search_target(e.path(), &extensions, include_text_special)
+            })
+        {
+            if cancel_flag.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let path = entry.path();
+            let file_matches = if is_extension_in(path, &spreadsheet_extensions()) {
+                search_xlsx_file(path, &query, &query_lower, case_sensitive)
+            } else if is_extension_in(path, &document_extensions()) {
+                search_document_file(path, &query, &query_lower, case_sensitive)
+            } else {
+                search_plain_text_file(path, &query, &query_lower, case_sensitive)
+            };
+
+            if !file_matches.is_empty() {
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let match_count = file_matches.len();
+                let result = SearchFileResult {
+                    file_path: path.to_string_lossy().to_string(),
+                    file_name,
+                    matches: file_matches,
+                };
+                let _ = app.emit(
+                    "search_stream_result",
+                    SearchStreamPayload {
+                        search_id: search_id_clone.clone(),
+                        result,
+                    },
+                );
+                total_files += 1;
+                total_matches += match_count;
+                if total_matches >= MAX_SEARCH_MATCHES {
+                    break;
+                }
+            }
+        }
+
+        let cancelled = cancel_flag.load(Ordering::Relaxed);
+        let limit_reached = total_matches >= MAX_SEARCH_MATCHES;
+        emit_done(total_files, total_matches, cancelled, limit_reached);
+    });
+
+    Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {

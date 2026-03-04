@@ -16,6 +16,19 @@ export interface SearchFileResult {
   matches: SearchMatch[];
 }
 
+export interface SearchStreamResultData {
+  searchId: string;
+  result: SearchFileResult;
+}
+
+export interface SearchStreamDoneData {
+  searchId: string;
+  totalFiles: number;
+  totalMatches: number;
+  cancelled: boolean;
+  limitReached: boolean;
+}
+
 export interface SupportedFileType {
   id: string;
   label: string;

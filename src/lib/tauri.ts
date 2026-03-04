@@ -13,7 +13,6 @@ import type {
   GeoJsonTileSessionData,
   LaunchTarget,
   ParquetPreviewData,
-  SearchFileResult,
   SqliteTableInfo,
   SqliteTablePreviewData,
   SupportedFileType,
@@ -49,18 +48,24 @@ export async function openInFileManager(path: string): Promise<void> {
   await invoke("open_in_file_manager", { path });
 }
 
-export async function searchFiles(
+export async function searchFilesStream(
   rootPath: string,
   query: string,
   caseSensitive: boolean,
-  fileTypeFilter: string
-): Promise<SearchFileResult[]> {
-  return invoke<SearchFileResult[]>("search_files", {
+  fileTypeFilter: string,
+  searchId: string
+): Promise<void> {
+  return invoke<void>("search_files_stream", {
     rootPath,
     query,
     caseSensitive,
-    fileTypeFilter
+    fileTypeFilter,
+    searchId
   });
+}
+
+export async function cancelSearch(searchId: string): Promise<void> {
+  return invoke<void>("cancel_search", { searchId });
 }
 
 export async function getSupportedFileTypes(): Promise<SupportedFileType[]> {
