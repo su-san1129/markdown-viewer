@@ -6,7 +6,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use rusqlite::Connection as SqliteConnection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -217,6 +217,13 @@ pub struct GeoJsonTileData {
     pub fallback_features: usize,
     pub lod_tolerance: f64,
     pub lod_mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoJsonDeviceProfile {
+    pub auto_cpu_cores: Option<u32>,
+    pub auto_device_memory_gb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3307,8 +3314,13 @@ fn dp_mark(points: &[(f64, f64)], keep: &mut [bool], start: usize, end: usize, t
     let mut max_distance = 0.0;
     let mut max_index = 0usize;
 
-    for idx in (start + 1)..end {
-        let dist = point_line_distance(points[idx], start_point, end_point);
+    for (idx, point) in points
+        .iter()
+        .enumerate()
+        .take(end)
+        .skip(start + 1)
+    {
+        let dist = point_line_distance(*point, start_point, end_point);
         if dist > max_distance {
             max_distance = dist;
             max_index = idx;
@@ -3864,8 +3876,7 @@ pub async fn read_geojson_tile(
     x: u32,
     y: u32,
     resolution_mode: Option<String>,
-    auto_cpu_cores: Option<u32>,
-    auto_device_memory_gb: Option<f64>,
+    device_profile: Option<GeoJsonDeviceProfile>,
     state: tauri::State<'_, GeoJsonTileStore>,
 ) -> Result<GeoJsonTileData, String> {
     let mut sessions = state
@@ -3890,8 +3901,10 @@ pub async fn read_geojson_tile(
                     Some("auto"),
                     session.file_size_bytes,
                     session.total_features,
-                    auto_cpu_cores,
-                    auto_device_memory_gb,
+                    device_profile.as_ref().and_then(|profile| profile.auto_cpu_cores),
+                    device_profile
+                        .as_ref()
+                        .and_then(|profile| profile.auto_device_memory_gb),
                 )
                 .to_string();
                 session.resolved_auto_mode = Some(resolved.clone());

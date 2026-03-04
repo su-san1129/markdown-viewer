@@ -176,14 +176,21 @@ export async function readGeoJsonTile(
     autoDeviceMemoryGb?: number;
   }
 ): Promise<GeoJsonTileData> {
+  const hasDeviceProfile = options?.autoCpuCores !== undefined
+    || options?.autoDeviceMemoryGb !== undefined;
+
   return invoke<GeoJsonTileData>("read_geojson_tile", {
     datasetId,
     z,
     x,
     y,
     resolutionMode: options?.resolutionMode,
-    autoCpuCores: options?.autoCpuCores,
-    autoDeviceMemoryGb: options?.autoDeviceMemoryGb
+    deviceProfile: hasDeviceProfile
+      ? {
+        autoCpuCores: options?.autoCpuCores,
+        autoDeviceMemoryGb: options?.autoDeviceMemoryGb
+      }
+      : undefined
   });
 }
 

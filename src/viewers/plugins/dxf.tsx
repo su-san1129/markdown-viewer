@@ -1503,6 +1503,7 @@ function strokeHatchPattern(
 }
 
 type Matrix2D = { a: number; b: number; c: number; d: number; e: number; f: number; };
+type Raw3dFace = { points: Point[]; };
 
 function identityMatrix(): Matrix2D {
   return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
@@ -1557,6 +1558,75 @@ function isIdentityMatrix(matrix: Matrix2D): boolean {
     && Math.abs(matrix.f) < eps;
 }
 
+function extractRaw3dFaces(content: string): Map<string, Raw3dFace> {
+  const lines = content.split(/\r?\n/);
+  const faces = new Map<string, Raw3dFace>();
+
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = lines[i]?.trim();
+    const value = lines[i + 1]?.trim();
+    if (code !== "0" || value !== "3DFACE") continue;
+
+    let handle = "";
+    let x0: number | null = null;
+    let y0: number | null = null;
+    let x1: number | null = null;
+    let y1: number | null = null;
+    let x2: number | null = null;
+    let y2: number | null = null;
+    let x3: number | null = null;
+    let y3: number | null = null;
+
+    let j = i + 2;
+    for (; j + 1 < lines.length; j += 2) {
+      const c = lines[j]?.trim();
+      const v = lines[j + 1]?.trim();
+      if (c === "0") break;
+
+      if (c === "5") handle = v.toUpperCase();
+      if (c === "10") x0 = Number(v);
+      if (c === "20") y0 = Number(v);
+      if (c === "11") x1 = Number(v);
+      if (c === "21") y1 = Number(v);
+      if (c === "12") x2 = Number(v);
+      if (c === "22") y2 = Number(v);
+      if (c === "13") x3 = Number(v);
+      if (c === "23") y3 = Number(v);
+    }
+
+    if (handle.length > 0) {
+      const points: Point[] = [];
+      const pushPoint = (x: number | null, y: number | null) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        points.push({ x: x as number, y: y as number });
+      };
+      pushPoint(x0, y0);
+      pushPoint(x1, y1);
+      pushPoint(x2, y2);
+      pushPoint(x3, y3);
+      if (points.length >= 3) {
+        faces.set(handle, { points });
+      }
+    }
+
+    i = j - 2;
+  }
+
+  return faces;
+}
+
+function extract3dFacePoints(
+  entity: Record<string, unknown>,
+  raw3dFaces: Map<string, Raw3dFace>
+): Point[] {
+  const handle = String(entity.handle ?? "").trim().toUpperCase();
+  if (handle.length > 0) {
+    const raw = raw3dFaces.get(handle);
+    if (raw) return raw.points.map((point) => ({ x: point.x, y: point.y }));
+  }
+  return extractFacePoints(entity);
+}
+
 function parseDxf(content: string): ParsedDxf {
   const parser = new DxfParser();
   const result = parser.parseSync(content) as
@@ -1583,15 +1653,32 @@ function parseDxf(content: string): ParsedDxf {
   const globalLineTypeScale = getGlobalLineTypeScale(
     result.header && typeof result.header === "object" ? result.header : undefined
   );
+  const raw3dFaces = extractRaw3dFaces(content);
 
   const primitives: Primitive[] = [];
   const layerCounts = new Map<string, number>();
   const unsupportedEntities = new Set<string>();
   const warningSet = new Set<string>();
+  const faceEdgeStats = new Map<
+    string,
+    { count: number; layer: string; start: Point; end: Point; stroke: StrokeStyle; }
+  >();
 
   const pushPrimitive = (primitive: Primitive) => {
     primitives.push(primitive);
     layerCounts.set(primitive.layer, (layerCounts.get(primitive.layer) ?? 0) + 1);
+  };
+  const addFaceEdge = (layer: string, start: Point, end: Point, stroke: StrokeStyle) => {
+    const keyPoint = (point: Point) => `${point.x.toFixed(6)},${point.y.toFixed(6)}`;
+    const a = keyPoint(start);
+    const b = keyPoint(end);
+    const key = a < b ? `${layer}|${a}|${b}` : `${layer}|${b}|${a}`;
+    const prev = faceEdgeStats.get(key);
+    if (prev) {
+      prev.count += 1;
+      return;
+    }
+    faceEdgeStats.set(key, { count: 1, layer, start, end, stroke });
   };
   const parseDimensionText = (
     entity: Record<string, unknown>,
@@ -1653,8 +1740,14 @@ function parseDxf(content: string): ParsedDxf {
     );
 
     if (type === "LINE") {
-      const start = entity.start as Point | undefined;
-      const end = entity.end as Point | undefined;
+      const start = (entity.start as Point | undefined)
+        ?? ((Array.isArray(entity.vertices) && entity.vertices[0])
+          ? (entity.vertices[0] as Point)
+          : undefined);
+      const end = (entity.end as Point | undefined)
+        ?? ((Array.isArray(entity.vertices) && entity.vertices[1])
+          ? (entity.vertices[1] as Point)
+          : undefined);
       if (!start || !end) return;
       pushPrimitive({
         kind: "line",
@@ -1687,7 +1780,24 @@ function parseDxf(content: string): ParsedDxf {
       return;
     }
 
-    if (type === "3DFACE" || type === "SOLID" || type === "TRACE") {
+    if (type === "3DFACE") {
+      // Convert 3DFACE meshes to boundary lines only:
+      // shared edges (count > 1) are interior mesh edges and are omitted.
+      const points = dedupeSequentialPoints(
+        transformPoints(extract3dFacePoints(entity, raw3dFaces), matrix)
+      );
+      if (points.length >= 2) {
+        for (let i = 0; i < points.length; i += 1) {
+          const a = points[i];
+          const b = points[(i + 1) % points.length];
+          if (Math.hypot(a.x - b.x, a.y - b.y) <= 1e-9) continue;
+          addFaceEdge(layer, a, b, stroke);
+        }
+      }
+      return;
+    }
+
+    if (type === "SOLID" || type === "TRACE") {
       const points = dedupeSequentialPoints(transformPoints(extractFacePoints(entity), matrix));
       if (points.length < 3) return;
       pushPrimitive({ kind: "face", layer, points });
@@ -2023,6 +2133,16 @@ function parseDxf(content: string): ParsedDxf {
   for (const entity of entities as Record<string, unknown>[]) {
     expandEntity(entity, identityMatrix(), [], 0);
   }
+  for (const edge of faceEdgeStats.values()) {
+    if (edge.count !== 1) continue;
+    pushPrimitive({
+      kind: "line",
+      layer: edge.layer,
+      start: edge.start,
+      end: edge.end,
+      stroke: edge.stroke
+    });
+  }
 
   const bounds = computeBounds(primitives) ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
   const layers = Array.from(layerCounts.entries())
@@ -2219,12 +2339,8 @@ function DxfCanvasViewer({ content }: { content: string; }) {
       }
       ctx.closePath();
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.14;
+      ctx.globalAlpha = 0.12;
       ctx.fill("nonzero");
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
