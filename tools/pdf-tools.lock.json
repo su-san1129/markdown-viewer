@@ -16,7 +16,7 @@
         },
         "linux-x64": {
           "url": "https://github.com/jgm/pandoc/releases/download/3.8.2/pandoc-3.8.2-linux-amd64.tar.gz",
-          "sha256": "d6d43a85f9c4f7fd74d22d5ec91653f9159825be6fef23d866d0e404fefe331f",
+          "sha256": "3252c5fd8234925f46973f4f17f852ccda64777a0c631d5735861c7eb4d69132",
           "archiveType": "tar.gz"
         },
         "linux-arm64": {
@@ -26,7 +26,7 @@
         },
         "windows-x64": {
           "url": "https://github.com/jgm/pandoc/releases/download/3.8.2/pandoc-3.8.2-windows-x86_64.zip",
-          "sha256": "119f9948af036cb27b6e9127eace4e2146f7f17f94ecfb86ee8f3e5f6ec15ad8",
+          "sha256": "3bcdc5c77ae5bd5406100c2c4bfdc8d17d5e4d756ad35f1791aa805282dcb33e",
           "archiveType": "zip"
         }
       }
