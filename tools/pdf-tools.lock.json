@@ -46,7 +46,7 @@
         },
         "linux-x64": {
           "url": "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-gnu.tar.gz",
-          "sha256": "f47fdf0d16dc16acc9b2784b8708166c36a18153d554ac8f84f542624c62e245",
+          "sha256": "875fbbc9ab48560d7776088c608e0beee49197b57ab4a2f6c5385b2c661c842f",
           "archiveType": "tar.gz"
         },
         "linux-arm64": {
@@ -56,7 +56,7 @@
         },
         "windows-x64": {
           "url": "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-pc-windows-msvc.zip",
-          "sha256": "793a34eca53d7dd87797ef4bf45fe8f0336f3a74ca0ec7467d63836793efe8a4",
+          "sha256": "1d6bb76f049c8a3774f6e9d66e4b04e1a8c3dcb37527b6b41b7e894328e7bf29",
           "archiveType": "zip"
         }
       }
