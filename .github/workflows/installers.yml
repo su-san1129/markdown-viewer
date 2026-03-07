@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.platform.name }})
+    name: Build (${{ matrix.platform.label }})
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ${{ matrix.platform.runner }}
 
@@ -18,11 +18,21 @@ jobs:
       matrix:
         platform:
           - name: macOS
-            runner: macos-latest
+            label: macOS arm64
+            runner: macos-14
+            artifact: macOS-arm64
+          - name: macOS
+            label: macOS x64
+            runner: macos-13
+            artifact: macOS-x64
           - name: Windows
+            label: Windows x64
             runner: windows-latest
+            artifact: Windows
           - name: Linux
+            label: Linux x64
             runner: ubuntu-22.04
+            artifact: Linux
 
     steps:
       - name: Checkout
@@ -52,9 +62,85 @@ jobs:
       - name: Build installers
         run: bun run tauri build
 
+      - name: Validate macOS signing secrets
+        if: matrix.platform.name == 'macOS'
+        env:
+          APPLE_DEVELOPER_ID_APP_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_BASE64 }}
+          APPLE_DEVELOPER_ID_APP_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_PASSWORD }}
+          APPLE_DEVELOPER_ID_APP_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          required=(
+            APPLE_DEVELOPER_ID_APP_BASE64
+            APPLE_DEVELOPER_ID_APP_PASSWORD
+            APPLE_DEVELOPER_ID_APP_IDENTITY
+            APPLE_ID
+            APPLE_TEAM_ID
+            APPLE_APP_PASSWORD
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required macOS signing secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Sign and notarize macOS artifacts
+        if: matrix.platform.name == 'macOS'
+        env:
+          APPLE_DEVELOPER_ID_APP_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_BASE64 }}
+          APPLE_DEVELOPER_ID_APP_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_PASSWORD }}
+          APPLE_DEVELOPER_ID_APP_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          CERT_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          APP_PATH=$(find src-tauri/target/release/bundle/macos -maxdepth 2 -name "*.app" -print -quit)
+          DMG_PATH=$(find src-tauri/target/release/bundle/dmg -maxdepth 2 -name "*.dmg" -print -quit)
+
+          if [ -z "${APP_PATH:-}" ] || [ ! -d "$APP_PATH" ]; then
+            echo "macOS .app bundle not found."
+            exit 1
+          fi
+          if [ -z "${DMG_PATH:-}" ] || [ ! -f "$DMG_PATH" ]; then
+            echo "macOS .dmg artifact not found."
+            exit 1
+          fi
+
+          echo -n "$APPLE_DEVELOPER_ID_APP_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_DEVELOPER_ID_APP_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          codesign --force --deep --options runtime --timestamp --sign "$APPLE_DEVELOPER_ID_APP_IDENTITY" "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          codesign --force --timestamp --sign "$APPLE_DEVELOPER_ID_APP_IDENTITY" "$DMG_PATH"
+          codesign --verify --verbose=2 "$DMG_PATH"
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler staple "$DMG_PATH"
+
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: installers-${{ matrix.platform.name }}
+          name: installers-${{ matrix.platform.artifact }}
           path: src-tauri/target/release/bundle
           if-no-files-found: error

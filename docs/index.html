@@ -995,12 +995,18 @@
             <div class="download-card-bg"></div>
             <div class="download-card-inner">
               <div class="download-os">macOS</div>
-              <div class="download-title">Mac Installer</div>
-              <div class="download-file">.dmg &mdash; Apple Silicon &amp; Intel</div>
-              <a id="macLink" href="#" class="download-btn" rel="noopener noreferrer">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Download
-              </a>
+              <div class="download-title">Mac Installer (.dmg)</div>
+              <div class="download-file">Choose your architecture</div>
+              <div style="display: grid; gap: 10px;">
+                <a id="macArmLink" href="#" class="download-btn" rel="noopener noreferrer">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Apple Silicon (arm64)
+                </a>
+                <a id="macX64Link" href="#" class="download-btn" rel="noopener noreferrer">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Intel (x64)
+                </a>
+              </div>
             </div>
           </div>
           <div class="download-card win reveal">
@@ -1094,7 +1100,8 @@
       const BASE_URL = `https://github.com/${OWNER}/${REPO}`;
 
       /* ── Elements ── */
-      const macLinkEl = document.getElementById('macLink');
+      const macArmLinkEl = document.getElementById('macArmLink');
+      const macX64LinkEl = document.getElementById('macX64Link');
       const winLinkEl = document.getElementById('winLink');
       const linuxLinkEl = document.getElementById('linuxLink');
       const allReleasesEl = document.getElementById('allReleases');
@@ -1108,7 +1115,8 @@
 
       /* ── Set default download links ── */
       const latestDL = `${BASE_URL}/releases/latest/download`;
-      macLinkEl.href = `${latestDL}/view-bomber-macos.dmg`;
+      macArmLinkEl.href = `${latestDL}/view-bomber-macos-arm64.dmg`;
+      macX64LinkEl.href = `${latestDL}/view-bomber-macos-x64.dmg`;
       winLinkEl.href = `${latestDL}/view-bomber-windows.msi`;
       linuxLinkEl.href = `${latestDL}/view-bomber-linux.AppImage`;
       allReleasesEl.href = `${BASE_URL}/releases`;
@@ -1118,8 +1126,8 @@
       (function detectOS() {
         var ua = navigator.userAgent;
         if (/Mac/i.test(ua)) {
-          heroCtaLabel.textContent = 'Download for macOS';
-          heroCtaEl.href = macLinkEl.href;
+          heroCtaLabel.textContent = 'Download for macOS (Apple Silicon)';
+          heroCtaEl.href = macArmLinkEl.href;
         } else if (/Win/i.test(ua)) {
           heroCtaLabel.textContent = 'Download for Windows';
           heroCtaEl.href = winLinkEl.href;
@@ -1155,6 +1163,15 @@
           var res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`, { headers: headers });
           if (!res.ok) throw new Error(res.status);
           var release = await res.json();
+          var assets = Array.isArray(release.assets) ? release.assets : [];
+          var macArmAsset = assets.find(function (asset) { return /^view-bomber-macos-arm64\./.test(asset.name); });
+          var macX64Asset = assets.find(function (asset) { return /^view-bomber-macos-x64\./.test(asset.name); });
+          var winAsset = assets.find(function (asset) { return /^view-bomber-windows\./.test(asset.name); });
+          var linuxAsset = assets.find(function (asset) { return /^view-bomber-linux\./.test(asset.name); });
+          if (macArmAsset && macArmAsset.browser_download_url) macArmLinkEl.href = macArmAsset.browser_download_url;
+          if (macX64Asset && macX64Asset.browser_download_url) macX64LinkEl.href = macX64Asset.browser_download_url;
+          if (winAsset && winAsset.browser_download_url) winLinkEl.href = winAsset.browser_download_url;
+          if (linuxAsset && linuxAsset.browser_download_url) linuxLinkEl.href = linuxAsset.browser_download_url;
           latestReleaseEl.href = release.html_url || `${BASE_URL}/releases/latest`;
           downloadStatusEl.textContent = 'Latest: ' + (release.name || release.tag_name || '');
         } catch (_) {

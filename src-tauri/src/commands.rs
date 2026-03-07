@@ -607,35 +607,60 @@ fn tectonic_binary_name() -> &'static str {
 
 fn resolve_bundled_binary(app: &AppHandle, binary_name: &str) -> Result<PathBuf, String> {
     let platform_dir = platform_bin_dir_name();
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
 
     if let Ok(resource_dir) = app.path().resource_dir() {
-        candidates.push(
+        candidates.push((
             resource_dir
                 .join("bin")
                 .join(platform_dir)
                 .join(binary_name),
-        );
+            false,
+        ));
+        candidates.push((
+            resource_dir
+                .join("_up_")
+                .join("resources")
+                .join("bin")
+                .join(platform_dir)
+                .join(binary_name),
+            true,
+        ));
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(
+        candidates.push((
+            cwd.join("src-tauri")
+                .join("resources")
+                .join("bin")
+                .join(platform_dir)
+                .join(binary_name),
+            false,
+        ));
+        candidates.push((
             cwd.join("resources")
                 .join("bin")
                 .join(platform_dir)
                 .join(binary_name),
-        );
-        candidates.push(
+            false,
+        ));
+        candidates.push((
             cwd.join("..")
                 .join("resources")
                 .join("bin")
                 .join(platform_dir)
                 .join(binary_name),
-        );
+            false,
+        ));
     }
 
-    for candidate in candidates {
+    for (candidate, legacy_updater_layout) in candidates {
         if candidate.is_file() {
+            if legacy_updater_layout {
+                eprintln!(
+                    "Using legacy bundled binary path layout (_up_/resources/bin). Please rebuild with current bundle.resources settings."
+                );
+            }
             return candidate
                 .canonicalize()
                 .map_err(|e| format!("Failed to resolve binary path: {}", e));

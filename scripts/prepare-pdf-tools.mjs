@@ -11,7 +11,7 @@ const rootDir = path.resolve(__dirname, "..");
 const lockFile = path.join(rootDir, "tools", "pdf-tools.lock.json");
 const cacheDir = path.join(rootDir, "tools", "cache");
 const stageRoot = path.join(rootDir, "tools", ".staging");
-const resourcesBinDir = path.join(rootDir, "resources", "bin");
+const resourcesBinDir = path.join(rootDir, "src-tauri", "resources", "bin");
 
 const SUPPORTED_ARCH = new Set(["x64", "arm64"]);
 const TOOLS = ["pandoc", "tectonic"];

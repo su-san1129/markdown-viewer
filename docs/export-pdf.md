@@ -14,18 +14,19 @@ View Bomber can export `.md` / `.markdown` files to PDF from the Markdown viewer
 
 The app expects bundled binaries at runtime:
 
-- macOS: `resources/bin/macos/pandoc`, `resources/bin/macos/tectonic`
-- Linux: `resources/bin/linux/pandoc`, `resources/bin/linux/tectonic`
-- Windows: `resources/bin/windows/pandoc.exe`, `resources/bin/windows/tectonic.exe`
+- macOS: `src-tauri/resources/bin/macos/pandoc`, `src-tauri/resources/bin/macos/tectonic`
+- Linux: `src-tauri/resources/bin/linux/pandoc`, `src-tauri/resources/bin/linux/tectonic`
+- Windows: `src-tauri/resources/bin/windows/pandoc.exe`,
+  `src-tauri/resources/bin/windows/tectonic.exe`
 
-`src-tauri/tauri.conf.json` includes `../resources/bin` in bundle resources.
+`src-tauri/tauri.conf.json` includes `resources/bin` in bundle resources.
 
 ## Automatic provisioning (build time)
 
 - `tauri build` runs `bun run prepare:pdf-tools` automatically.
 - The script reads `tools/pdf-tools.lock.json` (fixed URL + SHA-256).
 - Archives are downloaded into `tools/cache/`, verified, extracted, then copied to
-  `resources/bin/<platform>/`.
+  `src-tauri/resources/bin/<platform>/`.
 - On failure (network, SHA mismatch, missing binary), build fails immediately.
 
 ## Developer notes

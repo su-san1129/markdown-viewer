@@ -111,8 +111,12 @@ jobs:
             return 1
           }
 
-          mac_file=$(pick_one /tmp/installers/installers-macOS dmg pkg) || {
-            echo "macOS installer not found."
+          mac_arm64_file=$(pick_one /tmp/installers/installers-macOS-arm64 dmg pkg) || {
+            echo "macOS arm64 installer not found."
+            exit 1
+          }
+          mac_x64_file=$(pick_one /tmp/installers/installers-macOS-x64 dmg pkg) || {
+            echo "macOS x64 installer not found."
             exit 1
           }
           windows_file=$(pick_one /tmp/installers/installers-Windows msi exe) || {
@@ -124,7 +128,8 @@ jobs:
             exit 1
           }
 
-          cp "$mac_file" /tmp/release-upload/view-bomber-macos.${mac_file##*.}
+          cp "$mac_arm64_file" /tmp/release-upload/view-bomber-macos-arm64.${mac_arm64_file##*.}
+          cp "$mac_x64_file" /tmp/release-upload/view-bomber-macos-x64.${mac_x64_file##*.}
           cp "$windows_file" /tmp/release-upload/view-bomber-windows.${windows_file##*.}
           cp "$linux_file" /tmp/release-upload/view-bomber-linux.${linux_file##*.}
 
